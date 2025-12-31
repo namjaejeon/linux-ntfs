@@ -2,9 +2,13 @@ name: linux ntfs test CI
 
 on:
   push:
-    branches: [ "main" ]
+    branches:
+    - main
+    - ntfs-next
   pull_request:
-    branches: [ "main" ]
+    branches:
+    - main
+    - ntfs-next
 
 jobs:
   build:
