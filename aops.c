@@ -393,6 +393,19 @@ static int ntfs_write_mft_block(struct ntfs_inode *ni, struct page *page,
 			s64 vcn_off = vcn;
 
 			/*
+			 * Skip $MFT extent mft records and let them being written
+			 * by writeback to avioid deadlocks. the $MFT runlist
+			 * lock must be taken before $MFT extent mrec_lock is taken.
+			 */
+			if (tni && tni->nr_extents < 0 &&
+				tni->ext.base_ntfs_ino == NTFS_I(vol->mft_ino)) {
+				mutex_unlock(&tni->mrec_lock);
+				atomic_dec(&tni->count);
+				iput(vol->mft_ino);
+				continue;
+			}
+
+			/*
 			 * The record should be written.  If a locked ntfs
 			 * inode was returned, add it to the array of locked
 			 * ntfs inodes.
