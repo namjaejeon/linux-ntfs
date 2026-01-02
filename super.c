@@ -2422,9 +2422,6 @@ static const struct super_operations ntfs_sops = {
 #endif
 	.sync_fs	= ntfs_sync_fs,		/* Syscall: sync. */
 	.statfs		= ntfs_statfs,		/* Syscall: statfs */
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 16, 0)
-	.remount_fs	= ntfs_remount,		/* Syscall: mount -o remount. */
-#endif
 	.evict_inode	= ntfs_evict_big_inode,
 	.show_options	= ntfs_show_options,	/* Show mount options in proc. */
 };
@@ -2455,24 +2452,16 @@ static void precalc_free_clusters(struct work_struct *work)
  */
 static struct lock_class_key ntfs_mft_inval_lock_key;
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 16, 0)
 static int ntfs_fill_super(struct super_block *sb, struct fs_context *fc)
-#else
-static int ntfs_fill_super(struct super_block *sb, void *opt, const int silent)
-#endif
 {
 	char *boot;
 	struct inode *tmp_ino;
 	int blocksize, result;
 	pgoff_t lcn_bit_pages;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 16, 0)
 	struct ntfs_volume *vol = NTFS_SB(sb);
 	int silent = fc->sb_flags & SB_SILENT;
 
 	vol->sb = sb;
-#else
-	struct ntfs_volume *vol;
-#endif
 
 	/*
 	 * We do a pretty difficult piece of bootstrap by reading the
@@ -2486,31 +2475,6 @@ static int ntfs_fill_super(struct super_block *sb, void *opt, const int silent)
 	 */
 	lockdep_off();
 	ntfs_debug("Entering.");
-
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 16, 0)
-	/* Allocate a new struct ntfs_volume and place it in sb->s_fs_info. */
-	sb->s_fs_info = kmalloc(sizeof(struct ntfs_volume), GFP_NOFS);
-	vol = NTFS_SB(sb);
-	if (!vol) {
-		if (!silent)
-			ntfs_error(sb,
-				"Allocation of NTFS volume structure failed. Aborting mount...");
-		lockdep_on();
-		return -ENOMEM;
-	}
-	/* Initialize struct ntfs_volume structure. */
-	*vol = (struct ntfs_volume) {
-		.sb = sb,
-		.fmask = 0,
-		.dmask = 0,
-	};
-	init_rwsem(&vol->mftbmp_lock);
-	init_rwsem(&vol->lcnbmp_lock);
-
-	/* Important to get the mount options dealt with now. */
-	if (!parse_options(vol, (char *)opt))
-		goto err_out_now;
-#endif
 
 	if (vol->nls_map && !strcmp(vol->nls_map->charset, "utf8"))
 		vol->nls_utf8 = true;
@@ -2826,7 +2790,6 @@ struct kmem_cache *ntfs_index_ctx_cache;
 /* Driver wide mutex. */
 DEFINE_MUTEX(ntfs_lock);
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 16, 0)
 static int ntfs_get_tree(struct fs_context *fc)
 {
 	return get_tree_bdev(fc, ntfs_fill_super);
@@ -2886,21 +2849,6 @@ static struct file_system_type ntfs_fs_type = {
 	.kill_sb                = kill_block_super,
 	.fs_flags               = FS_REQUIRES_DEV | FS_ALLOW_IDMAP,
 };
-#else
-static struct dentry *ntfs_mount(struct file_system_type *fs_type,
-	int flags, const char *dev_name, void *data)
-{
-	return mount_bdev(fs_type, flags, dev_name, data, ntfs_fill_super);
-}
-
-static struct file_system_type ntfs_fs_type = {
-	.owner		= THIS_MODULE,
-	.name		= "ntfs",
-	.mount		= ntfs_mount,
-	.kill_sb	= kill_block_super,
-	.fs_flags	= FS_REQUIRES_DEV | FS_ALLOW_IDMAP,
-};
-#endif
 
 static int ntfs_workqueue_init(void)
 {
