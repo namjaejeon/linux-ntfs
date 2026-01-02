@@ -203,6 +203,7 @@ jobs:
         sudo ./check generic/378
         sudo ./check generic/393
         sudo ./check generic/394
+        sudo ./check generic/401
         sudo ./check generic/403
         sudo ./check generic/405
         sudo ./check generic/406
