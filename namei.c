@@ -907,8 +907,10 @@ static int ntfs_delete(struct ntfs_inode *ni, struct ntfs_inode *dir_ni,
 	actx = ntfs_attr_get_search_ctx(ni, NULL);
 	if (!actx) {
 		ntfs_error(sb, "%s, Failed to get search context", __func__);
-		mutex_unlock(&dir_ni->mrec_lock);
-		mutex_unlock(&ni->mrec_lock);
+		if (need_lock) {
+			mutex_unlock(&dir_ni->mrec_lock);
+			mutex_unlock(&ni->mrec_lock);
+		}
 		return -ENOMEM;
 	}
 search:
@@ -1036,8 +1038,10 @@ search:
 	return 0;
 err_out:
 	ntfs_attr_put_search_ctx(actx);
-	mutex_unlock(&dir_ni->mrec_lock);
-	mutex_unlock(&ni->mrec_lock);
+	if (need_lock) {
+		mutex_unlock(&dir_ni->mrec_lock);
+		mutex_unlock(&ni->mrec_lock);
+	}
 	return err;
 }
 
