@@ -40,6 +40,7 @@ struct ntfs_volume {
 	umode_t fmask;			/* The mask for file permissions. */
 	umode_t dmask;			/* The mask for directory permissions. */
 	u8 mft_zone_multiplier;		/* Initial mft zone multiplier. */
+	u8 full_zones;			/* cluster zones which are full */
 	u8 on_errors;			/* What to do on filesystem errors. */
 	errseq_t wb_err;
 	/* NTFS bootsector provided information. */

@@ -19,6 +19,58 @@
 #include "aops.h"
 #include "ntfs.h"
 
+enum {
+	ZONE_MFT = 1,
+	ZONE_DATA1 = 2,
+	ZONE_DATA2 = 4,
+	ALL_ZONES = 7
+};
+
+static void ntfs_cluster_set_zone_pos(s64 start, s64 end, s64 *pos, s64 tc)
+{
+	ntfs_debug("pos: %lld  tc: %lld\n", *pos, tc);
+
+	if (tc >= end)
+		*pos = start;
+	else if (tc >= start)
+		*pos = tc;
+}
+
+static void ntfs_cluster_update_zone_pos(struct ntfs_volume *vol, u8 zone, s64 tc)
+{
+	ntfs_debug("tc = %lld, zone = %d\n", tc, zone);
+
+	if (zone == ZONE_MFT)
+		ntfs_cluster_set_zone_pos(vol->mft_lcn, vol->mft_zone_end,
+				&vol->mft_zone_pos, tc);
+	else if (zone == ZONE_DATA1)
+		ntfs_cluster_set_zone_pos(vol->mft_zone_end, vol->nr_clusters,
+				&vol->data1_zone_pos, tc);
+	else /* zone == ZONE_DATA2 */
+		ntfs_cluster_set_zone_pos(0, vol->mft_zone_start,
+				&vol->data2_zone_pos, tc);
+}
+
+static void update_full_status(struct ntfs_volume *vol, s64 lcn)
+{
+	if (lcn >= vol->mft_zone_end) {
+		if (vol->full_zones & ZONE_DATA1) {
+			ntfs_cluster_update_zone_pos(vol, ZONE_DATA1, lcn);
+			vol->full_zones &= ~ZONE_DATA1;
+		}
+	} else {
+		if (lcn < vol->mft_zone_start) {
+			if (vol->full_zones & ZONE_DATA2) {
+				ntfs_cluster_update_zone_pos(vol, ZONE_DATA2, lcn);
+				vol->full_zones &= ~ZONE_DATA2;
+			}
+		} else if (vol->full_zones & ZONE_MFT) {
+			ntfs_cluster_update_zone_pos(vol, ZONE_MFT, lcn);
+			vol->full_zones &= ~ZONE_MFT;
+		}
+	}
+}
+
 /**
  * ntfs_cluster_free_from_rl_nolock - free clusters from runlist
  * @vol:	mounted ntfs volume on which to free the clusters
@@ -52,6 +104,8 @@ int ntfs_cluster_free_from_rl_nolock(struct ntfs_volume *vol,
 
 		if (rl->lcn < 0)
 			continue;
+
+		update_full_status(vol, rl->lcn);
 		err = ntfs_bitmap_clear_run(lcnbmp_vi, rl->lcn, rl->length);
 		if (unlikely(err && (!ret || ret == -ENOMEM) && ret != err))
 			ret = err;
@@ -293,6 +347,10 @@ struct runlist_element *ntfs_cluster_alloc(struct ntfs_volume *vol, const s64 st
 	mapping = lcnbmp_vi->i_mapping;
 	i_size = i_size_read(lcnbmp_vi);
 	while (1) {
+		/* check whether we have exhausted the current zone */
+		if (search_zone & vol->full_zones)
+			goto zone_pass_done;
+
 		ntfs_debug("Start of outer while loop: done_zones 0x%x, search_zone %i, pass %i, zone_start 0x%llx, zone_end 0x%llx, bmp_initial_pos 0x%llx, bmp_pos 0x%llx, rlpos %i, rlsize %i.",
 				done_zones, search_zone, pass,
 				zone_start, zone_end, bmp_initial_pos,
@@ -470,7 +528,7 @@ done:
 				ntfs_debug("Done. Updating current zone position, tc 0x%llx, search_zone %i.",
 						tc, search_zone);
 				switch (search_zone) {
-				case 1:
+				case ZONE_MFT:
 					ntfs_debug("Before checks, vol->mft_zone_pos 0x%llx.",
 							vol->mft_zone_pos);
 					if (tc >= vol->mft_zone_end) {
@@ -486,7 +544,7 @@ done:
 					ntfs_debug("After checks, vol->mft_zone_pos 0x%llx.",
 							vol->mft_zone_pos);
 					break;
-				case 2:
+				case ZONE_DATA1:
 					ntfs_debug("Before checks, vol->data1_zone_pos 0x%llx.",
 							vol->data1_zone_pos);
 					if (tc >= vol->nr_clusters)
@@ -500,7 +558,7 @@ done:
 					ntfs_debug("After checks, vol->data1_zone_pos 0x%llx.",
 							vol->data1_zone_pos);
 					break;
-				case 4:
+				case ZONE_DATA2:
 					ntfs_debug("Before checks, vol->data2_zone_pos 0x%llx.",
 							vol->data2_zone_pos);
 					if (tc >= vol->mft_zone_start)
@@ -523,9 +581,9 @@ done:
 
 		if (!used_zone_pos) {
 			used_zone_pos = 1;
-			if (search_zone == 1)
+			if (search_zone == ZONE_MFT)
 				zone_start = vol->mft_zone_pos;
-			else if (search_zone == 2)
+			else if (search_zone == ZONE_DATA1)
 				zone_start = vol->data1_zone_pos;
 			else
 				zone_start = vol->data2_zone_pos;
@@ -556,13 +614,13 @@ zone_pass_done:	/* Finished with the current zone pass. */
 			pass = 2;
 			zone_end = zone_start;
 			switch (search_zone) {
-			case 1: /* mft_zone */
+			case ZONE_MFT: /* mft_zone */
 				zone_start = vol->mft_zone_start;
 				break;
-			case 2: /* data1_zone */
+			case ZONE_DATA1: /* data1_zone */
 				zone_start = vol->mft_zone_end;
 				break;
-			case 4: /* data2_zone */
+			case ZONE_DATA2: /* data2_zone */
 				zone_start = 0;
 				break;
 			default:
@@ -581,12 +639,13 @@ done_zones_check:
 				search_zone, done_zones,
 				done_zones | search_zone);
 		done_zones |= search_zone;
-		if (done_zones < 7) {
+		vol->full_zones |= search_zone;
+		if (done_zones < ALL_ZONES) {
 			ntfs_debug("Switching zone.");
 			/* Now switch to the next zone we haven't done yet. */
 			pass = 1;
 			switch (search_zone) {
-			case 1:
+			case ZONE_MFT:
 				ntfs_debug("Switching from mft zone to data1 zone.");
 				/* Update mft zone position. */
 				if (rlpos && used_zone_pos) {
@@ -622,7 +681,7 @@ switch_to_data1_zone:		search_zone = 2;
 					pass = 2;
 				}
 				break;
-			case 2:
+			case ZONE_DATA1:
 				ntfs_debug("Switching from data1 zone to data2 zone.");
 				/* Update data1 zone position. */
 				if (rlpos && used_zone_pos) {
@@ -656,7 +715,7 @@ switch_to_data1_zone:		search_zone = 2;
 					pass = 2;
 				}
 				break;
-			case 4:
+			case ZONE_DATA2:
 				ntfs_debug("Switching from data2 zone to data1 zone.");
 				/* Update data2 zone position. */
 				if (rlpos && used_zone_pos) {
@@ -724,9 +783,9 @@ switch_to_data1_zone:		search_zone = 2;
 		}
 		bmp_pos = zone_start = bmp_initial_pos =
 				vol->data1_zone_pos = vol->mft_zone_end;
-		search_zone = 2;
+		search_zone = ZONE_DATA1;
 		pass = 2;
-		done_zones &= ~2;
+		done_zones &= ~ZONE_DATA1;
 		ntfs_debug("After shrinking mft zone, mft_zone_size 0x%llx, vol->mft_zone_start 0x%llx, vol->mft_zone_end 0x%llx, vol->mft_zone_pos 0x%llx, search_zone 2, pass 2, dones_zones 0x%x, zone_start 0x%llx, zone_end 0x%llx, vol->data1_zone_pos 0x%llx, continuing outer while loop.",
 				mft_zone_size, vol->mft_zone_start,
 				vol->mft_zone_end, vol->mft_zone_pos,
@@ -933,6 +992,7 @@ s64 __ntfs_cluster_free(struct ntfs_inode *ni, const s64 start_vcn, s64 count,
 
 	if (likely(rl->lcn >= 0)) {
 		/* Do the actual freeing of the clusters in this run. */
+		update_full_status(vol, rl->lcn + delta);
 		err = ntfs_bitmap_set_bits_in_run(lcnbmp_vi, rl->lcn + delta,
 				to_free, likely(!is_rollback) ? 0 : 1);
 		if (unlikely(err)) {
@@ -986,6 +1046,7 @@ s64 __ntfs_cluster_free(struct ntfs_inode *ni, const s64 start_vcn, s64 count,
 
 		if (likely(rl->lcn >= 0)) {
 			/* Do the actual freeing of the clusters in the run. */
+			update_full_status(vol, rl->lcn);
 			err = ntfs_bitmap_set_bits_in_run(lcnbmp_vi, rl->lcn,
 					to_free, likely(!is_rollback) ? 0 : 1);
 			if (unlikely(err)) {

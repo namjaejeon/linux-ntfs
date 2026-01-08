@@ -2826,6 +2826,7 @@ static int ntfs_init_fs_context(struct fs_context *fc)
 		.fmask = 0,
 		.dmask = 0,
 		.mft_zone_multiplier = 1,
+		.full_zones = 0,
 		.on_errors = ON_ERRORS_CONTINUE,
 		.nls_map = load_nls_default(),
 		.preallocated_size = NTFS_DEF_PREALLOC_SIZE,
