@@ -4208,7 +4208,7 @@ put_err_out:
  * by allocating new clusters.
  */
 static int ntfs_non_resident_attr_expand(struct ntfs_inode *ni, const s64 newsize,
-		const s64 prealloc_size, unsigned int holes)
+		const s64 prealloc_size, unsigned int holes, bool need_lock)
 {
 	s64 lcn_seek_from;
 	s64 first_free_vcn;
@@ -4420,9 +4420,11 @@ rollback:
 		ntfs_debug("Leaking clusters");
 
 	/* Now, truncate the runlist itself. */
-	down_write(&ni->runlist.lock);
+	if (need_lock)
+		down_write(&ni->runlist.lock);
 	err2 = ntfs_rl_truncate_nolock(vol, &ni->runlist, NTFS_B_TO_CLU(vol, org_alloc_size));
-	up_write(&ni->runlist.lock);
+	if (need_lock)
+		up_write(&ni->runlist.lock);
 	if (err2) {
 		/*
 		 * Failed to truncate the runlist, so just throw it away, it
@@ -4540,7 +4542,7 @@ attr_resize_again:
 		mark_mft_record_dirty(ctx->ntfs_ino);
 		ntfs_attr_put_search_ctx(ctx);
 		/* Resize non-resident attribute */
-		return ntfs_non_resident_attr_expand(attr_ni, newsize, prealloc_size, holes);
+		return ntfs_non_resident_attr_expand(attr_ni, newsize, prealloc_size, holes, true);
 	} else if (err != -ENOSPC && err != -EPERM) {
 		ntfs_error(sb, "Failed to make attribute non-resident");
 		goto put_err_out;
@@ -4714,7 +4716,8 @@ int __ntfs_attr_truncate_vfs(struct ntfs_inode *ni, const s64 newsize,
 			down_write(&ni->runlist.lock);
 			err = ntfs_non_resident_attr_expand(ni, newsize, 0,
 							    NVolDisableSparse(ni->vol) ?
-							    HOLES_NO : HOLES_OK);
+							    HOLES_NO : HOLES_OK,
+							    false);
 			up_write(&ni->runlist.lock);
 		} else
 			err = ntfs_non_resident_attr_shrink(ni, newsize);
@@ -4757,7 +4760,7 @@ int ntfs_attr_expand(struct ntfs_inode *ni, const s64 newsize, const s64 preallo
 		if (newsize > ni->data_size)
 			err = ntfs_non_resident_attr_expand(ni, newsize, prealloc_size,
 							    NVolDisableSparse(ni->vol) ?
-							    HOLES_NO : HOLES_OK);
+							    HOLES_NO : HOLES_OK, true);
 	} else
 		err = ntfs_resident_attr_resize(ni, newsize, prealloc_size,
 						NVolDisableSparse(ni->vol) ?
@@ -4813,7 +4816,7 @@ int ntfs_attr_truncate_i(struct ntfs_inode *ni, const s64 newsize, unsigned int 
 
 	if (NInoNonResident(ni)) {
 		if (newsize > ni->data_size)
-			err = ntfs_non_resident_attr_expand(ni, newsize, 0, holes);
+			err = ntfs_non_resident_attr_expand(ni, newsize, 0, holes, true);
 		else
 			err = ntfs_non_resident_attr_shrink(ni, newsize);
 	} else
