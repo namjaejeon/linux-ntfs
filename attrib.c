@@ -4437,10 +4437,12 @@ rollback:
 		/* Prepare to mapping pairs update. */
 		ni->allocated_size = org_alloc_size;
 		/* Restore mapping pairs. */
-		down_read(&ni->runlist.lock);
+		if (need_lock)
+			down_read(&ni->runlist.lock);
 		if (ntfs_attr_update_mapping_pairs(ni, 0))
 			ntfs_error(sb, "Failed to restore old mapping pairs");
-		up_read(&ni->runlist.lock);
+		if (need_lock)
+			up_read(&ni->runlist.lock);
 
 		if (NInoSparse(ni) || NInoCompressed(ni)) {
 			ni->itype.compressed.size =  org_compressed_size;
