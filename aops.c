@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-/**
+/*
  * NTFS kernel address space operations and page cache handling.
  *
  * Copyright (c) 2001-2014 Anton Altaparmakov and Tuxera Inc.
@@ -18,18 +18,13 @@
 #include "debug.h"
 #include "iomap.h"
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
-static s64 ntfs_convert_folio_index_into_lcn(struct ntfs_volume *vol, struct ntfs_inode *ni,
-		unsigned long folio_index)
-#else
-static s64 ntfs_convert_page_index_into_lcn(struct ntfs_volume *vol, struct ntfs_inode *ni,
-		unsigned long folio_index)
-#endif
+static s64 lcn_from_index(struct ntfs_volume *vol, struct ntfs_inode *ni,
+		unsigned long index)
 {
 	s64 vcn;
 	s64 lcn;
 
-	vcn = NTFS_PIDX_TO_CLU(vol, folio_index);
+	vcn = NTFS_PIDX_TO_CLU(vol, index);
 
 	down_read(&ni->runlist.lock);
 	lcn = ntfs_attr_vcn_to_lcn_nolock(ni, vcn, false);
@@ -39,22 +34,21 @@ static s64 ntfs_convert_page_index_into_lcn(struct ntfs_volume *vol, struct ntfs
 }
 
 /**
- * ntfs_read_folio - fill a @folio of a @file with data from the device
+ * ntfs_read_folio - Read data for a folio from the device
  * @file:	open file to which the folio @folio belongs or NULL
  * @folio:	page cache folio to fill with data
  *
- * For non-resident attributes, ntfs_read_folio() fills the @folio of the open
- * file @file by calling the ntfs version of the generic block_read_full_folio()
- * function, which in turn creates and reads in the buffers associated with
- * the folio asynchronously.
+ * This function handles reading data into the page cache. It first checks
+ * for specific ntfs attribute type like encryption and compression.
  *
- * For resident attributes, OTOH, ntfs_read_folio() fills @folio by copying the
- * data from the mft record (which at this stage is most likely in memory) and
- * fills the remainder with zeroes. Thus, in this case, I/O is synchronous, as
- * even if the mft record is not cached at this point in time, we need to wait
- * for it to be read in before we can do the copy.
+ * - If the attribute is encrypted, access is denied (-EACCES) because
+ *   decryption is not supported in this path.
+ * - If the attribute is non-resident and compressed, the read operation is
+ *   delegated to ntfs_read_compressed_block().
+ * - For normal resident or non-resident attribute, it utilizes the generic
+ *   iomap infrastructure via iomap_bio_read_folio() to perform the I/O.
  *
- * Return 0 on success and -errno on error.
+ * Return: 0 on success, or -errno on error.
  */
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 19, 0)
 static int ntfs_read_folio(struct file *file, struct folio *folio)
@@ -149,6 +143,18 @@ static int ntfs_readpage(struct file *file, struct page *page)
 #endif
 }
 
+void ntfs_bio_end_io(struct bio *bio)
+{
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
+	if (bio->bi_private)
+		folio_put((struct folio *)bio->bi_private);
+#else
+	if (bio->bi_private)
+		put_page((struct page *)bio->bi_private);
+#endif
+	bio_put(bio);
+}
+
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
 static int ntfs_write_mft_block(struct ntfs_inode *ni, struct folio *folio,
 		struct writeback_control *wbc)
@@ -170,7 +176,7 @@ static int ntfs_write_mft_block(struct ntfs_inode *ni, struct folio *folio,
 	ntfs_debug("Entering for inode 0x%lx, attribute type 0x%x, folio index 0x%lx.",
 			vi->i_ino, ni->type, folio->index);
 
-	lcn = ntfs_convert_folio_index_into_lcn(vol, ni, folio->index);
+	lcn = lcn_from_index(vol, ni, folio->index);
 	if (lcn <= LCN_HOLE) {
 		folio_start_writeback(folio);
 		folio_unlock(folio);
@@ -220,8 +226,8 @@ static int ntfs_write_mft_block(struct ntfs_inode *ni, struct folio *folio,
 			if (bio && (mft_ofs != prev_mft_ofs + vol->mft_record_size)) {
 flush_bio:
 				flush_dcache_folio(folio);
-				submit_bio_wait(bio);
-				bio_put(bio);
+				bio->bi_end_io = ntfs_bio_end_io;
+				submit_bio(bio);
 				bio = NULL;
 			}
 
@@ -238,8 +244,8 @@ flush_bio:
 				   (bio_end_sector(bio) >> (vol->cluster_size_bits - 9)) !=
 				    lcn) {
 					flush_dcache_folio(folio);
-					submit_bio_wait(bio);
-					bio_put(bio);
+					bio->bi_end_io = ntfs_bio_end_io;
+					submit_bio(bio);
 					bio = NULL;
 				}
 			}
@@ -293,8 +299,8 @@ flush_bio:
 
 	if (bio) {
 		flush_dcache_folio(folio);
-		submit_bio_wait(bio);
-		bio_put(bio);
+		bio->bi_end_io = ntfs_bio_end_io;
+		submit_bio(bio);
 	}
 	flush_dcache_folio(folio);
 unm_done:
@@ -365,7 +371,7 @@ static int ntfs_write_mft_block(struct ntfs_inode *ni, struct page *page,
 	BUG_ON(!((S_ISREG(vi->i_mode) && !vi->i_ino) || S_ISDIR(vi->i_mode) ||
 		(NInoAttr(ni) && ni->type == AT_INDEX_ALLOCATION)));
 
-	lcn = ntfs_convert_page_index_into_lcn(vol, ni, page->index);
+	lcn = lcn_from_index(vol, ni, page->index);
 	if (lcn <= LCN_HOLE) {
 		set_page_writeback(page);
 		unlock_page(page);
@@ -416,8 +422,8 @@ static int ntfs_write_mft_block(struct ntfs_inode *ni, struct page *page,
 			if (bio && (mft_ofs != prev_mft_ofs + vol->mft_record_size)) {
 flush_bio:
 				flush_dcache_page(page);
-				submit_bio_wait(bio);
-				bio_put(bio);
+				bio->bi_end_io = ntfs_bio_end_io;
+				submit_bio(bio);
 				bio = NULL;
 			}
 
@@ -433,8 +439,8 @@ flush_bio:
 				   (bio_end_sector(bio) >> (vol->cluster_size_bits - 9)) !=
 				    lcn) {
 					flush_dcache_page(page);
-					submit_bio_wait(bio);
-					bio_put(bio);
+					bio->bi_end_io = ntfs_bio_end_io;
+					submit_bio(bio);
 					bio = NULL;
 				}
 			}
@@ -487,8 +493,8 @@ flush_bio:
 
 	if (bio) {
 		flush_dcache_page(page);
-		submit_bio_wait(bio);
-		bio_put(bio);
+		bio->bi_end_io = ntfs_bio_end_io;
+		submit_bio(bio);
 	}
 	flush_dcache_page(page);
 unm_done:

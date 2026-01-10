@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-/**
+/*
  * NTFS kernel directory operations. Part of the Linux-NTFS project.
  *
  * Copyright (c) 2001-2007 Anton Altaparmakov
@@ -1184,6 +1184,9 @@ static int ntfs_dir_fsync(struct file *filp, loff_t start, loff_t end,
 	while (!(err = ntfs_attr_lookup(AT_FILE_NAME, NULL, 0, 0, 0, NULL, 0, ctx))) {
 		struct file_name_attr *fn = (struct file_name_attr *)((u8 *)ctx->attr +
 				le16_to_cpu(ctx->attr->data.resident.value_offset));
+
+		if (MREF_LE(fn->parent_directory) == ni->mft_no)
+			continue;
 
 		parent_vi = ntfs_iget(vi->i_sb, MREF_LE(fn->parent_directory));
 		if (IS_ERR(parent_vi))

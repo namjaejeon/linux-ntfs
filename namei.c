@@ -870,8 +870,8 @@ static int ntfs_test_inode_attr(struct inode *vi, void *data)
  * @name_len:   length of the name in unicode characters
  * @need_lock:  whether mrec lock is needed or not
  *
- * @ni is always closed after the call to this function (even if it failed),
- * user does not need to call ntfs_inode_close himself.
+ * Delete the specified name from the directory index @dir_ni and decrement
+ * the link count of the target inode @ni.
  */
 static int ntfs_delete(struct ntfs_inode *ni, struct ntfs_inode *dir_ni,
 		__le16 *name, u8 name_len, bool need_lock)
@@ -907,8 +907,10 @@ static int ntfs_delete(struct ntfs_inode *ni, struct ntfs_inode *dir_ni,
 	actx = ntfs_attr_get_search_ctx(ni, NULL);
 	if (!actx) {
 		ntfs_error(sb, "%s, Failed to get search context", __func__);
-		mutex_unlock(&dir_ni->mrec_lock);
-		mutex_unlock(&ni->mrec_lock);
+		if (need_lock) {
+			mutex_unlock(&dir_ni->mrec_lock);
+			mutex_unlock(&ni->mrec_lock);
+		}
 		return -ENOMEM;
 	}
 search:
@@ -1036,8 +1038,10 @@ search:
 	return 0;
 err_out:
 	ntfs_attr_put_search_ctx(actx);
-	mutex_unlock(&dir_ni->mrec_lock);
-	mutex_unlock(&ni->mrec_lock);
+	if (need_lock) {
+		mutex_unlock(&dir_ni->mrec_lock);
+		mutex_unlock(&ni->mrec_lock);
+	}
 	return err;
 }
 
@@ -1240,9 +1244,8 @@ out:
  * @name:	unicode name of the new link
  * @name_len:	length of the name in unicode characters
  *
- * NOTE: At present we allow creating hardlinks to directories, we use them
- * in a temporary state during rename. But it's defenitely bad idea to have
- * hard links to directories as a result of operation.
+ * Create a new hard link. This involves adding an entry to the directory
+ * index and adding a new FILE_NAME attribute to the target inode.
  */
 static int __ntfs_link(struct ntfs_inode *ni, struct ntfs_inode *dir_ni,
 		__le16 *name, u8 name_len)

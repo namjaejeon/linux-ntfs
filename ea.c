@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-/**
+/*
  * Pocessing of EA's
  *
  * Part of this file is based on code from the NTFS-3G project.

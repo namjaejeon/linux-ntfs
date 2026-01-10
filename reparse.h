@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
-/**
+/*
  * Copyright (c) 2008-2021 Jean-Pierre Andre
  * Copyright (c) 2025 LG Electronics Co., Ltd.
  */

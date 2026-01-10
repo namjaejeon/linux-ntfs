@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-/**
+/*
  * Processing of reparse points
  *
  * Part of this file is based on code from the NTFS-3G project.

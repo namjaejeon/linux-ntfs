@@ -192,7 +192,7 @@ struct runlist_element *ntfs_cluster_alloc(struct ntfs_volume *vol, const s64 st
 	int err = 0, rlpos, rlsize, buf_size, pg_off;
 	u8 pass, done_zones, search_zone, need_writeback = 0, bit;
 	unsigned int memalloc_flags;
-	u8 has_guess;
+	u8 has_guess, used_zone_pos;
 	pgoff_t index;
 
 	ntfs_debug("Entering for start_vcn 0x%llx, count 0x%llx, start_lcn 0x%llx, zone %s_ZONE.",
@@ -259,6 +259,8 @@ struct runlist_element *ntfs_cluster_alloc(struct ntfs_volume *vol, const s64 st
 		}
 		has_guess = 0;
 	}
+
+	used_zone_pos = has_guess ? 0 : 1;
 
 	if (!zone_start || zone_start == vol->mft_zone_start ||
 			zone_start == vol->mft_zone_end)
@@ -457,6 +459,8 @@ struct runlist_element *ntfs_cluster_alloc(struct ntfs_volume *vol, const s64 st
 			if (!--clusters) {
 				s64 tc;
 done:
+				if (!used_zone_pos)
+					goto out;
 				/*
 				 * Update the current zone position.  Positions
 				 * of already scanned zones have been updated
@@ -516,8 +520,25 @@ done:
 			}
 			lcn++;
 		}
+
+		if (!used_zone_pos) {
+			used_zone_pos = 1;
+			if (search_zone == 1)
+				zone_start = vol->mft_zone_pos;
+			else if (search_zone == 2)
+				zone_start = vol->data1_zone_pos;
+			else
+				zone_start = vol->data2_zone_pos;
+
+			if (!zone_start || zone_start == vol->mft_zone_start ||
+			    zone_start == vol->mft_zone_end)
+				pass = 2;
+			bmp_pos = zone_start;
+		} else {
 next_bmp_pos:
-		bmp_pos += buf_size;
+			bmp_pos += buf_size;
+		}
+
 		ntfs_debug("After inner while loop: buf_size 0x%x, lcn 0x%llx, bmp_pos 0x%llx, need_writeback %i.",
 				buf_size, lcn, bmp_pos, need_writeback);
 		if (bmp_pos < zone_end) {
@@ -568,7 +589,7 @@ done_zones_check:
 			case 1:
 				ntfs_debug("Switching from mft zone to data1 zone.");
 				/* Update mft zone position. */
-				if (rlpos) {
+				if (rlpos && used_zone_pos) {
 					s64 tc;
 
 					ntfs_debug("Before checks, vol->mft_zone_pos 0x%llx.",
@@ -604,7 +625,7 @@ switch_to_data1_zone:		search_zone = 2;
 			case 2:
 				ntfs_debug("Switching from data1 zone to data2 zone.");
 				/* Update data1 zone position. */
-				if (rlpos) {
+				if (rlpos && used_zone_pos) {
 					s64 tc;
 
 					ntfs_debug("Before checks, vol->data1_zone_pos 0x%llx.",
@@ -638,7 +659,7 @@ switch_to_data1_zone:		search_zone = 2;
 			case 4:
 				ntfs_debug("Switching from data2 zone to data1 zone.");
 				/* Update data2 zone position. */
-				if (rlpos) {
+				if (rlpos && used_zone_pos) {
 					s64 tc;
 
 					ntfs_debug("Before checks, vol->data2_zone_pos 0x%llx.",

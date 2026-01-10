@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-/**
+/*
  * NTFS kernel compressed attributes handling.
  * Part of the Linux-NTFS project.
  *
