@@ -2939,10 +2939,10 @@ int ntfs_mft_record_free(struct ntfs_volume *vol, struct ntfs_inode *ni)
 	unsigned int memalloc_flags;
 	struct ntfs_inode *base_ni;
 
-	ntfs_debug("Entering for inode 0x%llx.\n", (long long)ni->mft_no);
-
 	if (!vol || !ni)
 		return -EINVAL;
+
+	ntfs_debug("Entering for inode 0x%llx.\n", (long long)ni->mft_no);
 
 	ni_mrec = map_mft_record(ni);
 	if (IS_ERR(ni_mrec))
