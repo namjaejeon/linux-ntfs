@@ -894,8 +894,22 @@ static noinline int ntfs_set_acl_ex(struct mnt_idmap *idmap,
 	if (err == -ENODATA && !size)
 		err = 0; /* Removing non existed xattr. */
 	if (!err) {
-		set_cached_acl(inode, type, acl);
+		__le16 ea_size = 0;
+		umode_t old_mode = inode->i_mode;
+
 		inode->i_mode = mode;
+		mutex_lock(&NTFS_I(inode)->mrec_lock);
+		err = ntfs_ea_set_wsl_inode(inode, 0, &ea_size, NTFS_EA_MODE);
+		if (err) {
+			ntfs_set_ea(inode, name, name_len, NULL, 0,
+				    XATTR_REPLACE, NULL);
+			mutex_unlock(&NTFS_I(inode)->mrec_lock);
+			inode->i_mode = old_mode;
+			goto out;
+		}
+		mutex_unlock(&NTFS_I(inode)->mrec_lock);
+
+		set_cached_acl(inode, type, acl);
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
 		inode_set_ctime_current(inode);
 #else
