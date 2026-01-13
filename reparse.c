@@ -275,7 +275,7 @@ static struct ntfs_index_context *open_reparse_index(struct ntfs_volume *vol)
 		return NULL;
 	}
 
-	mutex_lock_nested(&NTFS_I(dir_vi)->mrec_lock, NTFS_REPARSE_MUTEX_PARENT);
+	mutex_lock_nested(&NTFS_I(dir_vi)->mrec_lock, NTFS_EXTEND_MUTEX_PARENT);
 	mref = ntfs_lookup_inode_by_name(NTFS_I(dir_vi), uname, uname_len,
 					 &name);
 	mutex_unlock(&NTFS_I(dir_vi)->mrec_lock);
@@ -378,7 +378,7 @@ int ntfs_delete_reparse_index(struct ntfs_inode *ni)
 	xr = open_reparse_index(ni->vol);
 	if (xr) {
 		xrni = xr->idx_ni;
-		mutex_lock_nested(&xrni->mrec_lock, NTFS_REPARSE_MUTEX_PARENT);
+		mutex_lock_nested(&xrni->mrec_lock, NTFS_EXTEND_MUTEX_PARENT);
 		err = remove_reparse_index(vi, xr, &reparse_tag);
 		if (err < 0) {
 			ntfs_index_ctx_put(xr);
@@ -451,7 +451,7 @@ static int ntfs_set_ntfs_reparse_data(struct ntfs_inode *ni, char *value, size_t
 	}
 
 	/* update value and index */
-	mutex_lock_nested(&xrni->mrec_lock, NTFS_REPARSE_MUTEX_PARENT);
+	mutex_lock_nested(&xrni->mrec_lock, NTFS_EXTEND_MUTEX_PARENT);
 	err = update_reparse_data(ni, xr, value, size);
 	if (err) {
 		ni->flags &= ~FILE_ATTR_REPARSE_POINT;

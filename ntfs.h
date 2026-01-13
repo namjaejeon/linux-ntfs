@@ -202,4 +202,7 @@ static inline int ntfs_ffs(int x)
 	return r;
 }
 
+/* From fs/ntfs/object_id.c */
+int ntfs_delete_object_id_index(struct ntfs_inode *ni);
+
 #endif /* _LINUX_NTFS_H */

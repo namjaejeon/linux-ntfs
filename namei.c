@@ -1011,6 +1011,7 @@ search:
 	if (ni_mrec->link_count == 0) {
 		NInoSetBeingDeleted(ni);
 		ntfs_delete_reparse_index(ni);
+		ntfs_delete_object_id_index(ni);
 		link_count_zero = true;
 	}
 

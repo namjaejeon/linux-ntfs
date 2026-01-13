@@ -1,0 +1,154 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+/*
+ * Pocessing of object ids
+ *
+ * Part of this file is based on code from the NTFS-3G project.
+ *
+ * Copyright (c) 2009-2019 Jean-Pierre Andre
+ * Copyright (c) 2025 LG Electronics Co., Ltd.
+ */
+
+#include "ntfs.h"
+#include "index.h"
+
+struct object_id_index_key {
+	union {
+		/* alignment may be needed to evaluate collations */
+		u32 alignment;
+		struct guid guid;
+	} object_id;
+}__packed;
+
+struct object_id_index_data {
+	__le64 file_id;
+	struct guid birth_volume_id;
+	struct guid birth_object_id;
+	struct guid domain_id;
+}__packed;
+
+/* Index entry in $Extend/$ObjId */
+struct object_id_index {
+	struct index_entry_header header;
+	struct object_id_index_key key;
+	struct object_id_index_data data;
+}__packed;
+
+static __le16 objid_index_name[] = {cpu_to_le16('$'), cpu_to_le16('O')};
+
+/*
+ *  Open the $Extend/$ObjId file and its index
+ *
+ *  Return the index context if opened
+ *  or NULL if an error occurred (errno tells why)
+ *
+ *  The index has to be freed and inode closed when not needed any more.
+ */
+static struct ntfs_index_context *open_object_id_index(struct ntfs_volume *vol)
+{
+	struct inode *dir_vi, *vi;
+	struct ntfs_inode *dir_ni;
+	struct ntfs_index_context *xo;
+	struct ntfs_name *name = NULL;
+	u64 mref;
+	int uname_len;
+	__le16 *uname;
+
+	uname_len = ntfs_nlstoucs(vol, "$ObjId", 6, &uname,
+			NTFS_MAX_NAME_LEN);
+	if (uname_len < 0)
+		return NULL;
+
+	/* do not use path_name_to inode - could reopen root */
+	dir_vi = ntfs_iget(vol->sb, FILE_Extend);
+	if (IS_ERR(dir_vi)) {
+		kmem_cache_free(ntfs_name_cache, uname);
+		return NULL;
+	}
+	dir_ni = NTFS_I(dir_vi);
+
+	mutex_lock_nested(&dir_ni->mrec_lock, NTFS_EXTEND_MUTEX_PARENT);
+	mref = ntfs_lookup_inode_by_name(dir_ni, uname, uname_len, &name);
+	mutex_unlock(&dir_ni->mrec_lock);
+	kfree(name);
+	kmem_cache_free(ntfs_name_cache, uname);
+	if (IS_ERR_MREF(mref))
+		goto put_dir_vi;
+
+	vi = ntfs_iget(vol->sb, MREF(mref));
+	if (IS_ERR(vi))
+		goto put_dir_vi;
+
+	xo = ntfs_index_ctx_get(NTFS_I(vi), objid_index_name, 2);
+	if (!xo)
+		iput(vi);
+put_dir_vi:
+	iput(dir_vi);
+	return xo;
+}
+
+/*
+ *              Remove an object id index entry if attribute present
+ *
+ *      Returns the size of existing object id
+ *                      (the existing object_d is returned)
+ *              -1 if failure, explained by errno
+ */
+static int remove_object_id_index(struct ntfs_inode *ni, struct ntfs_index_context *xo)
+{
+	struct object_id_index_key key;
+	struct object_id_attr *old_attr;
+	s64 size;
+
+	if (ni->data_size == 0)
+		return 0;
+
+	/* read the existing object id attribute */
+	size = ntfs_inode_attr_pread(VFS_I(ni), 0, sizeof(struct guid),
+				     (char *)old_attr);
+	if (size != sizeof(struct guid))
+		return -ENODATA;
+
+	memcpy(&key.object_id, &old_attr->object_id, sizeof(struct guid));
+	if (!ntfs_index_lookup(&key, sizeof(struct object_id_index_key), xo))
+		return ntfs_index_rm(xo);
+
+	return 0;
+}
+
+/*
+ *              Delete an object_id index entry
+ *
+ *      Returns 0 if success
+ *              -1 if failure, explained by errno
+ */
+int ntfs_delete_object_id_index(struct ntfs_inode *ni)
+{
+	struct ntfs_index_context *xo;
+	struct ntfs_inode *xoni, *attr_ni;
+	struct inode *attr_vi;
+	int ret = 0;
+
+	attr_vi = ntfs_attr_iget(VFS_I(ni), AT_OBJECT_ID, AT_UNNAMED, 0);
+	if (IS_ERR(attr_vi))
+		return PTR_ERR(attr_ni);
+
+	attr_ni = NTFS_I(attr_vi);
+
+	/*
+	 * read the existing object id and un-index it
+	 */
+	xo = open_object_id_index(attr_ni->vol);
+	if (xo) {
+		ret = remove_object_id_index(attr_ni, xo);
+		if (ret > 0) {
+			xoni = xo->idx_ni;
+			ntfs_index_entry_mark_dirty(xo);
+			mark_mft_record_dirty(xoni);
+			ntfs_index_ctx_put(xo);
+			iput(VFS_I(xoni));
+		}
+	}
+
+	iput(attr_vi);
+	return ret;
+}
