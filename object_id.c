@@ -36,12 +36,13 @@ struct object_id_index {
 static __le16 objid_index_name[] = {cpu_to_le16('$'), cpu_to_le16('O')};
 
 /*
- *  Open the $Extend/$ObjId file and its index
+ * open_object_id_index - Open the $Extend/$ObjId file and its index
+ * @vol: NTFS volume structure
  *
- *  Return the index context if opened
- *  or NULL if an error occurred (errno tells why)
+ * Opens the $ObjId system file and retrieves its index context.
  *
- *  The index has to be freed and inode closed when not needed any more.
+ * Return: The index context if opened successfully, or NULL if an error
+ *	   occurred.
  */
 static struct ntfs_index_context *open_object_id_index(struct ntfs_volume *vol)
 {
@@ -86,12 +87,15 @@ put_dir_vi:
 	return xo;
 }
 
-/*
- *              Remove an object id index entry if attribute present
+
+/**
+ * remove_object_id_index - Remove an object id index entry if attribute present
+ * @ni: NTFS inode structure containing the attribute
+ * @xo:	Index context for the object id index
  *
- *      Returns the size of existing object id
- *                      (the existing object_d is returned)
- *              -1 if failure, explained by errno
+ * Reads the existing object ID attribute and removes it from the index.
+ *
+ * Return: 0 on success, or a negative error code on failure.
  */
 static int remove_object_id_index(struct ntfs_inode *ni, struct ntfs_index_context *xo)
 {
@@ -115,11 +119,13 @@ static int remove_object_id_index(struct ntfs_inode *ni, struct ntfs_index_conte
 	return 0;
 }
 
-/*
- *              Delete an object_id index entry
+/**
+ * ntfs_delete_object_id_index - Delete an object_id index entry
+ * @ni:	NTFS inode structure
  *
- *      Returns 0 if success
- *              -1 if failure, explained by errno
+ * Opens the object ID index and removes the entry corresponding to the inode.
+ *
+ * Return: 0 on success, or a negative error code on failure.
  */
 int ntfs_delete_object_id_index(struct ntfs_inode *ni)
 {
