@@ -19,6 +19,7 @@
 #include "ea.h"
 #include "attrib.h"
 #include "iomap.h"
+#include "object_id.h"
 
 /**
  * ntfs_test_inode - compare two (possibly fake) inodes for equality
@@ -636,6 +637,10 @@ err_corrupt_attr:
 				ntfs_attr_name_free(&s);
 				return 2; /* it's reparse point file */
 			}
+			if (!strcmp("$ObjId", s)) {
+				ntfs_attr_name_free(&s);
+				return 3; /* it's object id file */
+			}
 			ntfs_attr_name_free(&s);
 			return 1;	/* YES, it's an extended system file. */
 		}
@@ -676,8 +681,6 @@ void ntfs_set_vfs_operations(struct inode *inode, mode_t mode, dev_t dev)
 		inode->i_mapping->a_ops = &ntfs_aops;
 	}
 }
-
-__le16 R[3] = { cpu_to_le16('$'), cpu_to_le16('R'), 0 };
 
 /**
  * ntfs_read_locked_inode - read an inode from its device
@@ -1119,11 +1122,16 @@ view_index_meta:
 			 */
 			extend_sys = ntfs_is_extended_system_file(ctx);
 			if (extend_sys > 0) {
-				if (m->flags & MFT_RECORD_IS_VIEW_INDEX &&
-				    extend_sys == 2) {
-					name = R;
-					name_len = 2;
-					goto view_index_meta;
+				if (m->flags & MFT_RECORD_IS_VIEW_INDEX) {
+					if (extend_sys == 2) {
+						name = reparse_index_name;
+						name_len = 2;
+						goto view_index_meta;
+					} else if (extend_sys == 3) {
+						name = objid_index_name;
+						name_len = 2;
+						goto view_index_meta;
+					}
 				}
 				goto no_data_attr_special_case;
 			}
@@ -2301,7 +2309,7 @@ static void __ntfs_clear_inode(struct ntfs_inode *ni)
 
 	if (ni->name_len && ni->name != I30 &&
 	    ni->name != reparse_index_name &&
-	    ni->name != R) {
+	    ni->name != objid_index_name) {
 		WARN_ON(!ni->name);
 		kfree(ni->name);
 	}

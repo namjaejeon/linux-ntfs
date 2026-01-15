@@ -1180,7 +1180,7 @@ static int ntfs_dir_fsync(struct file *filp, loff_t start, loff_t end,
 	if (!ctx)
 		return -ENOMEM;
 
-	mutex_lock_nested(&ni->mrec_lock, NTFS_INODE_MUTEX_NORMAL_2);
+	mutex_lock_nested(&ni->mrec_lock, NTFS_INODE_MUTEX_NORMAL_CHILD);
 	while (!(err = ntfs_attr_lookup(AT_FILE_NAME, NULL, 0, 0, 0, NULL, 0, ctx))) {
 		struct file_name_attr *fn = (struct file_name_attr *)((u8 *)ctx->attr +
 				le16_to_cpu(ctx->attr->data.resident.value_offset));
@@ -1191,7 +1191,7 @@ static int ntfs_dir_fsync(struct file *filp, loff_t start, loff_t end,
 		parent_vi = ntfs_iget(vi->i_sb, MREF_LE(fn->parent_directory));
 		if (IS_ERR(parent_vi))
 			continue;
-		mutex_lock_nested(&NTFS_I(parent_vi)->mrec_lock, NTFS_INODE_MUTEX_PARENT_2);
+		mutex_lock_nested(&NTFS_I(parent_vi)->mrec_lock, NTFS_INODE_MUTEX_NORMAL);
 		ia_vi = ntfs_index_iget(parent_vi, I30, 4);
 		mutex_unlock(&NTFS_I(parent_vi)->mrec_lock);
 		if (IS_ERR(ia_vi)) {

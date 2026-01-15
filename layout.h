@@ -1208,6 +1208,32 @@ struct guid {
 } __packed;
 
 /*
+ * struct OBJECT_ID_ATTR - Attribute: Object id (NTFS 3.0+) (0x40).
+ *
+ * NOTE: Always resident.
+ */
+struct object_id_attr {
+	struct guid object_id;	/* Unique id assigned to the file.*/
+	/*
+	 * The following fields are optional. The attribute value size is 16
+	 * bytes, i.e. sizeof(struct guid), if these are not present at all.
+	 * Note, the entries can be present but one or more (or all) can be
+	 * zero meaning that particular value(s) is(are) not defined. Note,
+	 * when the fields are missing here, it is well possible that they are
+	 * to be found within the $Extend/$ObjId system file indexed under the
+	 * above object_id.
+	 */
+	union {
+		struct {
+			struct guid birth_volume_id;
+			struct guid birth_object_id;
+			struct guid domain_id;
+		} __packed;
+		u8 extended_info[48];
+	} __packed;
+} __packed;
+
+/*
  * These relative identifiers (RIDs) are used with the above identifier
  * authorities to make up universal well-known SIDs.
  *

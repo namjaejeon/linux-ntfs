@@ -1,5 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 
+#ifndef _LINUX_NTFS_EA_H
+#define _LINUX_NTFS_EA_H
+
 #define NTFS_EA_UID	BIT(1)
 #define NTFS_EA_GID	BIT(2)
 #define NTFS_EA_MODE	BIT(3)
@@ -23,3 +26,5 @@ int ntfs_init_acl(struct mnt_idmap *idmap, struct inode *inode,
 #define ntfs_get_acl NULL
 #define ntfs_set_acl NULL
 #endif
+
+#endif /* _LINUX_NTFS_EA_H */

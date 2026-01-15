@@ -15,6 +15,7 @@
 #include "time.h"
 #include "index.h"
 #include "reparse.h"
+#include "object_id.h"
 #include "ea.h"
 
 static const __le16 aux_name_le[3] = {
@@ -1011,6 +1012,7 @@ search:
 	if (ni_mrec->link_count == 0) {
 		NInoSetBeingDeleted(ni);
 		ntfs_delete_reparse_index(ni);
+		ntfs_delete_object_id_index(ni);
 		link_count_zero = true;
 	}
 

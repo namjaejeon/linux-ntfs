@@ -4203,6 +4203,8 @@ put_err_out:
  * @ni:			non-resident ntfs attribute to expand
  * @prealloc_size:	preallocation size (in bytes) to which to expand the attribute
  * @newsize:		new size (in bytes) to which to expand the attribute
+ * @holes:		how to create a hole if expanding
+ * @need_lock:		whether mrec lock is needed or not
  *
  * Expand the size of a non-resident, open ntfs attribute @na to @newsize bytes,
  * by allocating new clusters.
@@ -4492,6 +4494,7 @@ attr_resize_again:
 		ntfs_error(sb, "%s: Failed to get search context", __func__);
 		return -ENOMEM;
 	}
+
 	err = ntfs_attr_lookup(attr_ni->type, attr_ni->name, attr_ni->name_len,
 			0, 0, NULL, 0, ctx);
 	if (err) {
@@ -4777,6 +4780,7 @@ int ntfs_attr_expand(struct ntfs_inode *ni, const s64 newsize, const s64 preallo
  * ntfs_attr_truncate_i - resize an ntfs attribute
  * @ni:		open ntfs inode to resize
  * @newsize:	new size (in bytes) to which to resize the attribute
+ * @holes:	how to create a hole if expanding
  *
  * Change the size of an open ntfs attribute @na to @newsize bytes. If the
  * attribute is made bigger and the attribute is resident the newly
