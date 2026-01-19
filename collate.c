@@ -94,8 +94,8 @@ static int ntfs_collate_ntofs_ulongs(struct ntfs_volume *vol,
  * ntfs_collate_file_name - Which of two filenames should be listed first
  */
 static int ntfs_collate_file_name(struct ntfs_volume *vol,
-		const void *data1, const u32 __always_unused data1_len,
-		const void *data2, const u32 __always_unused data2_len)
+		const void *data1, const u32 data1_len,
+		const void *data2, const u32 data2_len)
 {
 	int rc;
 
