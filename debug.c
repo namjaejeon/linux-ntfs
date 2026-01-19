@@ -38,18 +38,18 @@ void __ntfs_warning(const char *function, const struct super_block *sb,
 	va_start(args, fmt);
 	vaf.fmt = fmt;
 	vaf.va = &args;
-#ifndef DEBUG
-	if (sb)
-		pr_warn_ratelimited("(device %s): %s(): %pV\n",
-			sb->s_id, flen ? function : "", &vaf);
-	else
-		pr_warn_ratelimited("%s(): %pV\n", flen ? function : "", &vaf);
-#else
+#ifdef DEBUG
 	if (sb)
 		pr_warn("(device %s): %s(): %pV\n",
 			sb->s_id, flen ? function : "", &vaf);
 	else
 		pr_warn("%s(): %pV\n", flen ? function : "", &vaf);
+#else
+	if (sb)
+		pr_warn_ratelimited("(device %s): %s(): %pV\n",
+			sb->s_id, flen ? function : "", &vaf);
+	else
+		pr_warn_ratelimited("%s(): %pV\n", flen ? function : "", &vaf);
 #endif
 	va_end(args);
 }
@@ -85,18 +85,18 @@ void __ntfs_error(const char *function, struct super_block *sb,
 	va_start(args, fmt);
 	vaf.fmt = fmt;
 	vaf.va = &args;
-#ifndef DEBUG
-	if (sb)
-		pr_err_ratelimited("(device %s): %s(): %pV\n",
-		       sb->s_id, flen ? function : "", &vaf);
-	else
-		pr_err_ratelimited("%s(): %pV\n", flen ? function : "", &vaf);
-#else
+#ifdef DEBUG
 	if (sb)
 		pr_err("(device %s): %s(): %pV\n",
 		       sb->s_id, flen ? function : "", &vaf);
 	else
 		pr_err("%s(): %pV\n", flen ? function : "", &vaf);
+#else
+	if (sb)
+		pr_err_ratelimited("(device %s): %s(): %pV\n",
+		       sb->s_id, flen ? function : "", &vaf);
+	else
+		pr_err_ratelimited("%s(): %pV\n", flen ? function : "", &vaf);
 #endif
 	va_end(args);
 
