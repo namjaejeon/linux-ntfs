@@ -597,7 +597,7 @@ static int ntfs_ie_lookup(const void *key, const u32 key_len,
 		 */
 		rc = ntfs_collate(icx->idx_ni->vol, icx->cr, key, key_len, &ie->key,
 				le16_to_cpu(ie->key_length));
-		if (rc == -2) {
+		if (rc == -EINVAL) {
 			ntfs_error(icx->idx_ni->vol->sb,
 				"Collation error. Perhaps a filename contains invalid characters?\n");
 			return -ERANGE;
