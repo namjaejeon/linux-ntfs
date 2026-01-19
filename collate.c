@@ -99,31 +99,13 @@ static int ntfs_collate_file_name(struct ntfs_volume *vol,
 {
 	int rc;
 
-	ntfs_debug("Entering.\n");
-	rc = ntfs_file_compare_values(data1, data2, -2,
+	rc = ntfs_file_compare_values(data1, data2, -EINVAL,
 			IGNORE_CASE, vol->upcase, vol->upcase_len);
 	if (!rc)
 		rc = ntfs_file_compare_values(data1, data2,
-			-2, CASE_SENSITIVE, vol->upcase, vol->upcase_len);
-	ntfs_debug("Done, returning %i.\n", rc);
+			-EINVAL, CASE_SENSITIVE, vol->upcase, vol->upcase_len);
 	return rc;
 }
-
-typedef int (*ntfs_collate_func_t)(struct ntfs_volume *, const void *, const u32,
-		const void *, const u32);
-
-static ntfs_collate_func_t ntfs_do_collate0x0[3] = {
-	ntfs_collate_binary,
-	ntfs_collate_file_name,
-	NULL/*ntfs_collate_unicode_string*/,
-};
-
-static ntfs_collate_func_t ntfs_do_collate0x1[4] = {
-	ntfs_collate_ntofs_ulong,
-	NULL/*ntfs_collate_ntofs_sid*/,
-	NULL/*ntfs_collate_ntofs_security_hash*/,
-	ntfs_collate_ntofs_ulongs,
-};
 
 /**
  * ntfs_collate - collate two data items using a specified collation rule
@@ -136,34 +118,28 @@ static ntfs_collate_func_t ntfs_do_collate0x1[4] = {
  *
  * Collate the two data items @data1 and @data2 using the collation rule @cr
  * and return -1, 0, ir 1 if @data1 is found, respectively, to collate before,
- * to match, or to collate after @data2.
- *
- * For speed we use the collation rule @cr as an index into two tables of
- * function pointers to call the appropriate collation function.
+ * to match, or to collate after @data2. return -EINVAL if an error occurred.
  */
 int ntfs_collate(struct ntfs_volume *vol, __le32 cr,
 		const void *data1, const u32 data1_len,
 		const void *data2, const u32 data2_len)
 {
-	int i;
-
-	ntfs_debug("Entering.");
-
-	if (cr != COLLATION_BINARY && cr != COLLATION_NTOFS_ULONG &&
-	    cr != COLLATION_FILE_NAME && cr != COLLATION_NTOFS_ULONGS)
+	switch (le32_to_cpu(cr)) {
+	case le32_to_cpu(COLLATION_BINARY):
+		return ntfs_collate_binary(vol, data1, data1_len,
+					   data2, data2_len);
+	case le32_to_cpu(COLLATION_FILE_NAME):
+		return ntfs_collate_file_name(vol, data1, data1_len,
+					      data2, data2_len);
+	case le32_to_cpu(COLLATION_NTOFS_ULONG):
+		return ntfs_collate_ntofs_ulong(vol, data1, data1_len,
+						data2, data2_len);
+	case le32_to_cpu(COLLATION_NTOFS_ULONGS):
+		return ntfs_collate_ntofs_ulongs(vol, data1, data1_len,
+						 data2, data2_len);
+	default:
+		ntfs_error(vol->sb, "Unknown collation rule 0x%x",
+			   le32_to_cpu(cr));
 		return -EINVAL;
-
-	i = le32_to_cpu(cr);
-	if (i < 0)
-		return -1;
-	if (i <= 0x02)
-		return ntfs_do_collate0x0[i](vol, data1, data1_len,
-				data2, data2_len);
-	if (i < 0x10)
-		return -1;
-	i -= 0x10;
-	if (likely(i <= 3))
-		return ntfs_do_collate0x1[i](vol, data1, data1_len,
-				data2, data2_len);
-	return 0;
+	}
 }
