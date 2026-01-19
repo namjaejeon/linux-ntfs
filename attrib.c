@@ -5490,7 +5490,7 @@ int ntfs_attr_fallocate(struct ntfs_inode *ni, loff_t start, loff_t byte_len, bo
 					cpu_to_le64(old_data_size);
 			else
 				ctx->attr->data.resident.value_length =
-					cpu_to_le64(old_data_size);
+					cpu_to_le32((u32)old_data_size);
 			mark_mft_record_dirty(ni);
 		}
 	}

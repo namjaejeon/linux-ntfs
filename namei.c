@@ -42,16 +42,17 @@ static const __le16 prn_name_le[3] = {
 	cpu_to_le16('P'), cpu_to_le16('R'), cpu_to_le16('N')
 };
 
-static inline int ntfs_check_bad_char(const unsigned short *wc,
-		unsigned int wc_len)
+static inline int ntfs_check_bad_char(const __le16 *wc, unsigned int wc_len)
 {
 	int i;
 
 	for (i = 0; i < wc_len; i++) {
-		if ((wc[i] < 0x0020) ||
-		    (wc[i] == 0x0022) || (wc[i] == 0x002A) || (wc[i] == 0x002F) ||
-		    (wc[i] == 0x003A) || (wc[i] == 0x003C) || (wc[i] == 0x003E) ||
-		    (wc[i] == 0x003F) || (wc[i] == 0x005C) || (wc[i] == 0x007C))
+		u16 c = le16_to_cpu(wc[i]);
+
+		if (c < 0x0020 ||
+		    c == 0x0022 || c == 0x002A || c == 0x002F ||
+		    c == 0x003A || c == 0x003C || c == 0x003E ||
+		    c == 0x003F || c == 0x005C || c == 0x007C)
 			return -EINVAL;
 	}
 
@@ -59,7 +60,7 @@ static inline int ntfs_check_bad_char(const unsigned short *wc,
 }
 
 static int ntfs_check_bad_windows_name(struct ntfs_volume *vol,
-				       const unsigned short *wc,
+				       const __le16 *wc,
 				       unsigned int wc_len)
 {
 	if (ntfs_check_bad_char(wc, wc_len))
@@ -684,7 +685,7 @@ static struct ntfs_inode *__ntfs_create(struct user_namespace *mnt_userns, struc
 		if (rollback_reparse)
 			fn->file_attributes |= FILE_ATTR_REPARSE_POINT;
 	}
-	if (NVolHideDotFiles(vol) && (name_len > 0 && name[0] == '.'))
+	if (NVolHideDotFiles(vol) && name_len > 0 && name[0] == cpu_to_le16('.'))
 		fn->file_attributes |= FILE_ATTR_HIDDEN;
 	fn->creation_time = fn->last_data_change_time = utc2ntfs(ni->i_crtime);
 	fn->last_mft_change_time = fn->last_access_time = fn->creation_time;
@@ -1314,7 +1315,7 @@ static int __ntfs_link(struct ntfs_inode *ni, struct ntfs_inode *dir_ni,
 			fn->allocated_size = cpu_to_le64(ni->allocated_size);
 		fn->data_size = cpu_to_le64(ni->data_size);
 	}
-	if (NVolHideDotFiles(dir_ni->vol) && (name_len > 0 && name[0] == '.'))
+	if (NVolHideDotFiles(dir_ni->vol) && name_len > 0 && name[0] == cpu_to_le16('.'))
 		fn->file_attributes |= FILE_ATTR_HIDDEN;
 
 	fn->creation_time = utc2ntfs(ni->i_crtime);

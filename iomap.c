@@ -181,19 +181,19 @@ static bool ntfs_iomap_valid(struct inode *inode, const struct iomap *iomap)
 #endif
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
-const struct iomap_write_ops ntfs_zero_iomap_folio_ops = {
+static const struct iomap_write_ops ntfs_zero_iomap_folio_ops = {
 	.put_folio = ntfs_iomap_put_folio,
 	.iomap_valid = ntfs_iomap_valid,
 };
 #else
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0)
-const struct iomap_folio_ops ntfs_zero_iomap_folio_ops = {
+static const struct iomap_folio_ops ntfs_zero_iomap_folio_ops = {
 	.put_folio = ntfs_iomap_put_folio,
 	.iomap_valid = ntfs_iomap_valid,
 };
 #else
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
-const struct iomap_page_ops ntfs_zero_iomap_page_ops = {
+static const struct iomap_page_ops ntfs_zero_iomap_page_ops = {
 	.page_done = ntfs_zero_range_page_done,
 	.iomap_valid = ntfs_iomap_valid,
 };
@@ -411,7 +411,7 @@ static int ntfs_zero_read_iomap_end(struct inode *inode, loff_t pos, loff_t leng
 }
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
-const struct iomap_ops ntfs_zero_read_iomap_ops = {
+static const struct iomap_ops ntfs_zero_read_iomap_ops = {
 	.iomap_begin = ntfs_read_iomap_begin,
 	.iomap_end = ntfs_zero_read_iomap_end,
 };
@@ -429,7 +429,7 @@ static int ntfs_read_iomap_begin(struct inode *inode, loff_t offset, loff_t leng
 	return __ntfs_read_iomap_begin(inode, offset, length, flags, iomap, srcmap, false);
 }
 
-const struct iomap_ops ntfs_zero_read_iomap_ops = {
+static const struct iomap_ops ntfs_zero_read_iomap_ops = {
 	.iomap_begin = ntfs_zero_read_iomap_begin,
 	.iomap_end = ntfs_zero_read_iomap_end,
 };

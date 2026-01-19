@@ -54,9 +54,9 @@ int ntfs_index_entry_inconsistent(struct ntfs_index_context *icx,
 		ie_end = (u8 *)ih + le32_to_cpu(ih->index_length);
 
 		if (ie_start > (u8 *)ie ||
-		    ie_end <= ((u8 *)ie + ie->length) ||
-		    ie->length > le32_to_cpu(ih->allocated_size) ||
-		    ie->length > icx->block_size) {
+		    ie_end <= (u8 *)ie + le16_to_cpu(ie->length) ||
+		    le16_to_cpu(ie->length) > le32_to_cpu(ih->allocated_size) ||
+		    le16_to_cpu(ie->length) > icx->block_size) {
 			ntfs_error(vol->sb, "Index entry(0x%p) is out of range from %s",
 					(u8 *)icx->entry,
 					icx->is_in_root ? "index root" : "index block");

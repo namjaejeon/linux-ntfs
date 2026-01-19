@@ -37,7 +37,7 @@ int ntfs_mft_record_check(const struct ntfs_volume *vol, struct mft_record *m,
 		goto err_out;
 	}
 
-	if ((m->usa_ofs & 0x1) ||
+	if (le16_to_cpu(m->usa_ofs) & 0x1 ||
 	    (vol->mft_record_size >> NTFS_BLOCK_SIZE_BITS) + 1 != le16_to_cpu(m->usa_count) ||
 	    le16_to_cpu(m->usa_ofs) + le16_to_cpu(m->usa_count) * 2 > vol->mft_record_size) {
 		ntfs_error(sb, "Record %llu has corrupt fix-up values fields\n",

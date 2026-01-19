@@ -954,7 +954,7 @@ nextdir:
 		}
 
 		if (ie_pos < actor->pos) {
-			ie_pos += next->length;
+			ie_pos += le16_to_cpu(next->length);
 			continue;
 		}
 
@@ -1031,7 +1031,7 @@ filldir:
 			private->key_length = next->key_length;
 			break;
 		}
-		ie_pos += next->length;
+		ie_pos += le16_to_cpu(next->length);
 	}
 
 	if (!err)
@@ -1092,7 +1092,7 @@ int ntfs_check_empty_dir(struct ntfs_inode *ni, struct mft_record *ni_mrec)
 	}
 
 	/* Non-empty directory? */
-	if (ctx->attr->data.resident.value_length !=
+	if (le32_to_cpu(ctx->attr->data.resident.value_length) !=
 	    sizeof(struct index_root) + sizeof(struct index_entry_header)) {
 		/* Both ENOTEMPTY and EEXIST are ok. We use the more common. */
 		ret = -ENOTEMPTY;

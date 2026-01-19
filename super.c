@@ -2997,6 +2997,6 @@ MODULE_AUTHOR("Namjae Jeon <linkinjeon@kernel.org>"); /* Add write, iomap and va
 MODULE_DESCRIPTION("NTFS read-write filesystem driver");
 MODULE_LICENSE("GPL");
 #ifdef DEBUG
-module_param(debug_msgs, bint, 0);
+module_param(debug_msgs, uint, 0);
 MODULE_PARM_DESC(debug_msgs, "Enable debug messages.");
 #endif

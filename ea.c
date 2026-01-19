@@ -20,7 +20,7 @@
 #include "ea.h"
 #include "malloc.h"
 
-static int ntfs_write_ea(struct ntfs_inode *ni, int type, char *value, s64 ea_off,
+static int ntfs_write_ea(struct ntfs_inode *ni, __le32 type, char *value, s64 ea_off,
 		s64 ea_size, bool need_truncate)
 {
 	struct inode *ea_vi;
@@ -116,7 +116,8 @@ static int ntfs_get_ea(struct inode *inode, const char *name, size_t name_len,
 	char *ea_buf;
 	s64 ea_off, ea_size, all_ea_size, ea_info_size;
 	int err;
-	unsigned short int ea_value_len, ea_info_qlen;
+	u32 ea_info_qlen;
+	u16 ea_value_len;
 	struct ea_information *p_ea_info;
 
 	if (!NInoHasEA(ni))
@@ -129,7 +130,7 @@ static int ntfs_get_ea(struct inode *inode, const char *name, size_t name_len,
 		return -ENODATA;
 	}
 
-	ea_info_qlen = le16_to_cpu(p_ea_info->ea_query_length);
+	ea_info_qlen = le32_to_cpu(p_ea_info->ea_query_length);
 	ntfs_free(p_ea_info);
 
 	ea_buf = ntfs_attr_readall(ni, AT_EA, NULL, 0, &all_ea_size);
@@ -191,7 +192,7 @@ static int ntfs_set_ea(struct inode *inode, const char *name, size_t name_len,
 	struct ea_information *p_ea_info = NULL;
 	int ea_packed, err = 0;
 	struct ea_attr *p_ea;
-	unsigned short int ea_info_qsize = 0;
+	u32 ea_info_qsize = 0;
 	char *ea_buf = NULL;
 	size_t new_ea_size = ALIGN(struct_size(p_ea, ea_name, 1 + name_len + val_size), 4);
 	s64 ea_off, ea_info_size, all_ea_size, ea_size;
@@ -262,7 +263,7 @@ create_ea_info:
 
 		memmove((char *)p_ea, (char *)p_ea + ea_size, ea_info_qsize - (ea_off + ea_size));
 		ea_info_qsize -= ea_size;
-		p_ea_info->ea_query_length = cpu_to_le16(ea_info_qsize);
+		p_ea_info->ea_query_length = cpu_to_le32(ea_info_qsize);
 
 		err = ntfs_write_ea(ni, AT_EA_INFORMATION, (char *)p_ea_info, 0,
 				sizeof(struct ea_information), false);
@@ -444,7 +445,7 @@ ssize_t ntfs_listxattr(struct dentry *dentry, char *buffer, size_t size)
 	const struct ea_attr *p_ea;
 	s64 offset, ea_buf_size, ea_info_size;
 	int next, err = 0, ea_size;
-	unsigned int ea_info_qsize;
+	u32 ea_info_qsize;
 	char *ea_buf = NULL;
 	ssize_t ret = 0;
 	struct ea_information *ea_info;
@@ -458,7 +459,7 @@ ssize_t ntfs_listxattr(struct dentry *dentry, char *buffer, size_t size)
 	if (!ea_info || ea_info_size != sizeof(struct ea_information))
 		goto out;
 
-	ea_info_qsize = le16_to_cpu(ea_info->ea_query_length);
+	ea_info_qsize = le32_to_cpu(ea_info->ea_query_length);
 
 	ea_buf = ntfs_attr_readall(ni, AT_EA, NULL, 0, &ea_buf_size);
 	if (!ea_buf)
@@ -533,7 +534,7 @@ static int ntfs_getxattr(const struct xattr_handler *handler,
 			err = -ENODATA;
 		} else {
 			err = sizeof(u8);
-			*(u8 *)buffer = ni->flags;
+			*(u8 *)buffer = (u8)(le32_to_cpu(ni->flags) & 0x3F);
 		}
 		goto out;
 	}

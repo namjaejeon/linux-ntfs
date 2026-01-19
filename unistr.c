@@ -240,7 +240,7 @@ int ntfs_nlstoucs(const struct ntfs_volume *vol, const char *ins,
 			if (vol->nls_utf8) {
 				o = utf8s_to_utf16s(ins, ins_len,
 						    UTF16_LITTLE_ENDIAN,
-						    ucs,
+						    (wchar_t *)ucs,
 						    max_name_len + 2);
 				if (o < 0 || o > max_name_len) {
 					wc_len = o;

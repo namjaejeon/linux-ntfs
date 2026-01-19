@@ -268,7 +268,7 @@ enum {
 	MFT_RECORD_IS_DIRECTORY		= cpu_to_le16(0x0002),
 	MFT_RECORD_IS_4			= cpu_to_le16(0x0004),
 	MFT_RECORD_IS_VIEW_INDEX	= cpu_to_le16(0x0008),
-	MFT_REC_SPACE_FILLER		= 0xffff, /*Just to make flags 16-bit.*/
+	MFT_REC_SPACE_FILLER		= cpu_to_le16(0xffff), /*Just to make flags 16-bit.*/
 } __packed;
 
 /*
