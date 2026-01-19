@@ -550,7 +550,7 @@ static struct index_root *ntfs_ir_lookup2(struct ntfs_inode *ni, __le16 *name, u
 /**
  * Find a key in the index block.
  */
-static int ntfs_ie_lookup(const void *key, const int key_len,
+static int ntfs_ie_lookup(const void *key, const u32 key_len,
 		struct ntfs_index_context *icx, struct index_header *ih,
 		s64 *vcn, struct index_entry **ie_out)
 {
@@ -724,7 +724,7 @@ static int ntfs_icx_parent_dec(struct ntfs_index_context *icx)
  * the call to ntfs_index_ctx_put() to ensure that the changes are written
  * to disk.
  */
-int ntfs_index_lookup(const void *key, const int key_len, struct ntfs_index_context *icx)
+int ntfs_index_lookup(const void *key, const u32 key_len, struct ntfs_index_context *icx)
 {
 	s64 old_vcn, vcn;
 	struct ntfs_inode *ni = icx->idx_ni;
@@ -736,7 +736,7 @@ int ntfs_index_lookup(const void *key, const int key_len, struct ntfs_index_cont
 
 	ntfs_debug("Entering\n");
 
-	if (!key || key_len <= 0) {
+	if (!key) {
 		ntfs_error(sb, "key: %p  key_len: %d", key, key_len);
 		return -EINVAL;
 	}
@@ -1929,7 +1929,7 @@ err_out:
 	return ret;
 }
 
-int ntfs_index_remove(struct ntfs_inode *dir_ni, const void *key, const int keylen)
+int ntfs_index_remove(struct ntfs_inode *dir_ni, const void *key, const u32 keylen)
 {
 	int ret = 0;
 	struct ntfs_index_context *icx;

@@ -15,8 +15,8 @@
 #include "ntfs.h"
 
 static int ntfs_collate_binary(struct ntfs_volume *vol,
-		const void *data1, const int data1_len,
-		const void *data2, const int data2_len)
+		const void *data1, const u32 data1_len,
+		const void *data2, const u32 data2_len)
 {
 	int rc;
 
@@ -33,19 +33,17 @@ static int ntfs_collate_binary(struct ntfs_volume *vol,
 }
 
 static int ntfs_collate_ntofs_ulong(struct ntfs_volume *vol,
-		const void *data1, const int data1_len,
-		const void *data2, const int data2_len)
+		const void *data1, const u32 data1_len,
+		const void *data2, const u32 data2_len)
 {
 	int rc;
-	u32 d1, d2;
+	u32 d1 = le32_to_cpup(data1), d2 = le32_to_cpup(data2);
 
 	ntfs_debug("Entering.");
 
 	if (data1_len != data2_len || data1_len != 4)
 		return -EINVAL;
 
-	d1 = le32_to_cpup(data1);
-	d2 = le32_to_cpup(data2);
 	if (d1 < d2)
 		rc = -1;
 	else {
@@ -64,8 +62,8 @@ static int ntfs_collate_ntofs_ulong(struct ntfs_volume *vol,
  * Returns: -1, 0 or 1 depending of how the arrays compare
  */
 static int ntfs_collate_ntofs_ulongs(struct ntfs_volume *vol,
-		const void *data1, const int data1_len,
-		const void *data2, const int data2_len)
+		const void *data1, const u32 data1_len,
+		const void *data2, const u32 data2_len)
 {
 	int rc;
 	int len;
@@ -73,7 +71,7 @@ static int ntfs_collate_ntofs_ulongs(struct ntfs_volume *vol,
 	u32 d1, d2;
 
 	ntfs_debug("Entering.");
-	if ((data1_len != data2_len) || (data1_len <= 0) || (data1_len & 3)) {
+	if (data1_len != data2_len || data1_len & 3) {
 		ntfs_error(vol->sb, "data1_len or data2_len not valid\n");
 		return -1;
 	}
@@ -101,8 +99,8 @@ static int ntfs_collate_ntofs_ulongs(struct ntfs_volume *vol,
  * ntfs_collate_file_name - Which of two filenames should be listed first
  */
 static int ntfs_collate_file_name(struct ntfs_volume *vol,
-		const void *data1, const int __always_unused data1_len,
-		const void *data2, const int __always_unused data2_len)
+		const void *data1, const u32 __always_unused data1_len,
+		const void *data2, const u32 __always_unused data2_len)
 {
 	int rc;
 
@@ -116,8 +114,8 @@ static int ntfs_collate_file_name(struct ntfs_volume *vol,
 	return rc;
 }
 
-typedef int (*ntfs_collate_func_t)(struct ntfs_volume *, const void *, const int,
-		const void *, const int);
+typedef int (*ntfs_collate_func_t)(struct ntfs_volume *, const void *, const u32,
+		const void *, const u32);
 
 static ntfs_collate_func_t ntfs_do_collate0x0[3] = {
 	ntfs_collate_binary,
@@ -149,8 +147,8 @@ static ntfs_collate_func_t ntfs_do_collate0x1[4] = {
  * function pointers to call the appropriate collation function.
  */
 int ntfs_collate(struct ntfs_volume *vol, __le32 cr,
-		const void *data1, const int data1_len,
-		const void *data2, const int data2_len)
+		const void *data1, const u32 data1_len,
+		const void *data2, const u32 data2_len)
 {
 	int i;
 
