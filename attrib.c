@@ -320,11 +320,10 @@ int ntfs_map_runlist(struct ntfs_inode *ni, s64 vcn)
 
 struct runlist_element *ntfs_attr_vcn_to_rl(struct ntfs_inode *ni, s64 vcn, s64 *lcn)
 {
-	struct runlist_element *rl;
+	struct runlist_element *rl = ni->runlist.rl;
 	int err;
 	bool is_retry = false;
 
-	rl = ni->runlist.rl;
 	if (!rl) {
 		err = ntfs_attr_map_whole_runlist(ni);
 		if (err)
@@ -895,7 +894,7 @@ static int ntfs_external_attr_find(const __le32 type,
 		const u32 ic, const s64 lowest_vcn,
 		const u8 *val, const u32 val_len, struct ntfs_attr_search_ctx *ctx)
 {
-	struct ntfs_inode *base_ni, *ni;
+	struct ntfs_inode *base_ni = ctx->base_ntfs_ino, *ni = ctx->ntfs_ino;
 	struct ntfs_volume *vol;
 	struct attr_list_entry *al_entry, *next_al_entry;
 	u8 *al_start, *al_end;
@@ -906,8 +905,6 @@ static int ntfs_external_attr_find(const __le32 type,
 	int err = 0;
 	static const char *es = " Unmount and run chkdsk.";
 
-	ni = ctx->ntfs_ino;
-	base_ni = ctx->base_ntfs_ino;
 	ntfs_debug("Entering for inode 0x%lx, type 0x%x.", ni->mft_no, type);
 	if (!base_ni) {
 		/* First call happens with the base mft record. */
