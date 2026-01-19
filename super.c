@@ -2775,7 +2775,7 @@ struct kmem_cache *ntfs_big_inode_cache;
 /* Init once constructor for the inode slab cache. */
 static void ntfs_big_inode_init_once(void *foo)
 {
-	struct ntfs_inode *ni = (struct ntfs_inode *)foo;
+	struct ntfs_inode *ni = foo;
 
 	inode_init_once(VFS_I(ni));
 }

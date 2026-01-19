@@ -181,7 +181,7 @@ static inline struct mft_record *map_mft_record_page(struct ntfs_inode *ni)
 err_out:
 	ni->folio = NULL;
 	ni->folio_ofs = 0;
-	return (void *)folio;
+	return (struct mft_record *)folio;
 #else
 	page = read_mapping_page(mft_vi->i_mapping, index, NULL);
 	if (!IS_ERR(page)) {
@@ -213,7 +213,7 @@ err_out:
 err_out:
 	ni->page = NULL;
 	ni->page_ofs = 0;
-	return (void *)page;
+	return (struct mft_record *)page;
 #endif
 }
 
@@ -805,7 +805,7 @@ err_out:
 
 static int ntfs_test_inode_wb(struct inode *vi, unsigned long ino, void *data)
 {
-	struct ntfs_attr *na = (struct ntfs_attr *)data;
+	struct ntfs_attr *na = data;
 
 	if (!ntfs_test_inode(vi, na))
 		return 0;

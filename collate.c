@@ -69,7 +69,7 @@ static int ntfs_collate_ntofs_ulongs(struct ntfs_volume *vol,
 {
 	int rc;
 	int len;
-	const __le32 *p1, *p2;
+	const __le32 *p1 = data1, *p2 = data2;
 	u32 d1, d2;
 
 	ntfs_debug("Entering.");
@@ -78,8 +78,6 @@ static int ntfs_collate_ntofs_ulongs(struct ntfs_volume *vol,
 		return -1;
 	}
 
-	p1 = (const __le32 *)data1;
-	p2 = (const __le32 *)data2;
 	len = data1_len;
 	do {
 		d1 = le32_to_cpup(p1);

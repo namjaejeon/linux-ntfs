@@ -39,13 +39,11 @@
  */
 int ntfs_test_inode(struct inode *vi, void *data)
 {
-	struct ntfs_attr *na = (struct ntfs_attr *)data;
-	struct ntfs_inode *ni;
+	struct ntfs_attr *na = data;
+	struct ntfs_inode *ni = NTFS_I(vi);
 
 	if (vi->i_ino != na->mft_no)
 		return 0;
-
-	ni = NTFS_I(vi);
 
 	/* If !NInoAttr(ni), @vi is a normal file or directory inode. */
 	if (likely(!NInoAttr(ni))) {
@@ -89,7 +87,7 @@ int ntfs_test_inode(struct inode *vi, void *data)
  */
 static int ntfs_init_locked_inode(struct inode *vi, void *data)
 {
-	struct ntfs_attr *na = (struct ntfs_attr *)data;
+	struct ntfs_attr *na = data;
 	struct ntfs_inode *ni = NTFS_I(vi);
 
 	vi->i_ino = na->mft_no;
