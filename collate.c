@@ -14,6 +14,12 @@
 #include "debug.h"
 #include "ntfs.h"
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 16, 0)
+#include <linux/sort.h>
+#else
+#define cmp_int(l, r) (((l) > (r)) - ((l) < (r)))
+#endif
+
 static int ntfs_collate_binary(struct ntfs_volume *vol,
 		const void *data1, const u32 data1_len,
 		const void *data2, const u32 data2_len)
@@ -65,12 +71,10 @@ static int ntfs_collate_ntofs_ulongs(struct ntfs_volume *vol,
 		const void *data1, const u32 data1_len,
 		const void *data2, const u32 data2_len)
 {
-	int rc;
 	int len;
 	const __le32 *p1 = data1, *p2 = data2;
 	u32 d1, d2;
 
-	ntfs_debug("Entering.");
 	if (data1_len != data2_len || data1_len & 3) {
 		ntfs_error(vol->sb, "data1_len or data2_len not valid\n");
 		return -1;
@@ -82,17 +86,8 @@ static int ntfs_collate_ntofs_ulongs(struct ntfs_volume *vol,
 		p1++;
 		d2 = le32_to_cpup(p2);
 		p2++;
-	} while ((d1 == d2) && ((len -= 4) > 0));
-	if (d1 < d2)
-		rc = -1;
-	else {
-		if (d1 == d2)
-			rc = 0;
-		else
-			rc = 1;
-	}
-	ntfs_debug("Done, returning %i.", rc);
-	return rc;
+	} while (d1 == d2 && (len -= 4) > 0);
+	return cmp_int(d1, d2);
 }
 
 /**
