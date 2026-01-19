@@ -89,7 +89,7 @@ int ntfs_index_entry_inconsistent(struct ntfs_index_context *icx, struct ntfs_vo
 struct ntfs_index_context *ntfs_index_ctx_get(struct ntfs_inode *ni, __le16 *name,
 		u32 name_len);
 void ntfs_index_ctx_put(struct ntfs_index_context *ictx);
-int ntfs_index_lookup(const void *key, const int key_len,
+int ntfs_index_lookup(const void *key, const u32 key_len,
 		struct ntfs_index_context *ictx);
 
 /**
@@ -115,7 +115,7 @@ static inline void ntfs_index_entry_flush_dcache_page(struct ntfs_index_context 
 
 void ntfs_index_entry_mark_dirty(struct ntfs_index_context *ictx);
 int ntfs_index_add_filename(struct ntfs_inode *ni, struct file_name_attr *fn, u64 mref);
-int ntfs_index_remove(struct ntfs_inode *ni, const void *key, const int keylen);
+int ntfs_index_remove(struct ntfs_inode *ni, const void *key, const u32 keylen);
 struct ntfs_inode *ntfs_ia_open(struct ntfs_index_context *icx, struct ntfs_inode *ni);
 struct index_entry *ntfs_index_walk_down(struct index_entry *ie, struct ntfs_index_context *ictx);
 struct index_entry *ntfs_index_next(struct index_entry *ie, struct ntfs_index_context *ictx);

@@ -1281,6 +1281,10 @@ static int __ntfs_link(struct ntfs_inode *ni, struct ntfs_inode *dir_ni,
 
 	/* Create FILE_NAME attribute. */
 	fn_len = sizeof(struct file_name_attr) + name_len * sizeof(__le16);
+	if (name_len > NTFS_MAX_NAME_LEN) {
+		err = -EIO;
+		goto err_out;
+	}
 	fn = ntfs_malloc_nofs(fn_len);
 	if (!fn) {
 		err = -ENOMEM;
