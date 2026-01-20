@@ -25,6 +25,6 @@ void mark_ntfs_record_dirty(struct page *page);
 #endif
 int ntfs_dev_read(struct super_block *sb, void *buf, loff_t start, loff_t end);
 int ntfs_dev_write(struct super_block *sb, void *buf, loff_t start,
-			loff_t size, bool wait);
+		loff_t size);
 void ntfs_bio_end_io(struct bio *bio);
 #endif /* _LINUX_NTFS_AOPS_H */

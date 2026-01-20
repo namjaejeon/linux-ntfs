@@ -794,7 +794,7 @@ map_vcn:
 
 		do {
 			err = ntfs_dev_write(sb, empty_buf, start,
-						  vol->cluster_size, should_wait);
+						  vol->cluster_size);
 			if (err) {
 				ntfs_error(sb, "ntfs_dev_write failed, err : %d\n", err);
 				goto io_err;
@@ -807,8 +807,13 @@ map_vcn:
 			 * completed ignore errors afterwards as we can assume
 			 * that if one buffer worked all of them will work.
 			 */
-			if (should_wait)
+			if (should_wait) {
 				should_wait = false;
+				err = filemap_write_and_wait_range(sb->s_bdev->bd_mapping,
+						start, start + vol->cluster_size);
+				if (err)
+					goto io_err;
+			}
 			start += vol->cluster_size;
 		} while (start < end);
 	} while ((++rl)->vcn < end_vcn);

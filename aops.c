@@ -968,8 +968,7 @@ int ntfs_dev_read(struct super_block *sb, void *buf, loff_t start, loff_t size)
 	return 0;
 }
 
-int ntfs_dev_write(struct super_block *sb, void *buf, loff_t start,
-			loff_t size, bool wait)
+int ntfs_dev_write(struct super_block *sb, void *buf, loff_t start, loff_t size)
 {
 	pgoff_t idx, idx_end;
 	loff_t offset, end = start + size;
@@ -1001,8 +1000,6 @@ int ntfs_dev_write(struct super_block *sb, void *buf, loff_t start,
 		buf_off += to;
 		folio_mark_uptodate(folio);
 		folio_mark_dirty(folio);
-		if (wait)
-			folio_wait_stable(folio);
 		folio_put(folio);
 	}
 
@@ -1044,8 +1041,7 @@ int ntfs_dev_read(struct super_block *sb, void *buf, loff_t start, loff_t size)
 	return 0;
 }
 
-int ntfs_dev_write(struct super_block *sb, void *buf, loff_t start,
-			loff_t size, bool wait)
+int ntfs_dev_write(struct super_block *sb, void *buf, loff_t start, loff_t size)
 {
 	pgoff_t idx, idx_end;
 	loff_t offset, end = start + size;
@@ -1076,8 +1072,6 @@ int ntfs_dev_write(struct super_block *sb, void *buf, loff_t start,
 		kunmap_atomic(kaddr);
 		SetPageUptodate(page);
 		set_page_dirty(page);
-		if (wait)
-			wait_for_stable_page(page);
 		put_page(page);
 	}
 
