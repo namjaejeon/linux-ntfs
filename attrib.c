@@ -2923,6 +2923,17 @@ static void __ntfs_attr_init(struct ntfs_inode *ni,
 
 /**
  * ntfs_attr_init - initialize an ntfs_attr with data sizes and status
+ * @ni: ntfs inode to initialize
+ * @non_resident: true if attribute is non-resident
+ * @compressed: true if attribute is compressed
+ * @encrypted: true if attribute is encrypted
+ * @sparse: true if attribute is sparse
+ * @allocated_size: allocated size of the attribute
+ * @data_size: actual data size of the attribute
+ * @initialized_size: initialized size of the attribute
+ * @compressed_size: compressed size (if compressed or sparse)
+ * @compression_unit: compression unit size (log2 of clusters)
+ *
  * Final initialization for an ntfs attribute.
  */
 static void ntfs_attr_init(struct ntfs_inode *ni, const bool non_resident,
@@ -4490,8 +4501,9 @@ put_err_out:
 /**
  * ntfs_resident_attr_resize - resize a resident, open ntfs attribute
  * @attr_ni:		resident ntfs inode to resize
- * @prealloc_size:	preallocation size (in bytes) to which to resize the attribute
  * @newsize:		new size (in bytes) to which to resize the attribute
+ * @prealloc_size:	preallocation size (in bytes) to which to resize the attribute
+ * @holes:		flags indicating how to handle holes
  *
  * Change the size of a resident, open ntfs attribute @na to @newsize bytes.
  */

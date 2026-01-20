@@ -22,6 +22,10 @@
 
 /**
  * ntfs_rl_mm - runlist memmove
+ * @base: base runlist array
+ * @dst: destination index in @base
+ * @src: source index in @base
+ * @size: number of elements to move
  *
  * It is up to the caller to serialize access to the runlist @base.
  */
@@ -33,6 +37,11 @@ static inline void ntfs_rl_mm(struct runlist_element *base, int dst, int src, in
 
 /**
  * ntfs_rl_mc - runlist memory copy
+ * @dstbase: destination runlist array
+ * @dst: destination index in @dstbase
+ * @srcbase: source runlist array
+ * @src: source index in @srcbase
+ * @size: number of elements to copy
  *
  * It is up to the caller to serialize access to the runlists @dstbase and
  * @srcbase.
@@ -181,6 +190,12 @@ static inline void __ntfs_rl_merge(struct runlist_element *dst, struct runlist_e
 
 /**
  * ntfs_rl_append - append a runlist after a given element
+ * @dst: destination runlist to append to
+ * @dsize: number of elements in @dst
+ * @src: source runlist to append from
+ * @ssize: number of elements in @src
+ * @loc: index in @dst after which to append @src
+ * @new_size: on success, set to the new combined size
  *
  * Append the runlist @src after element @loc in @dst.  Merge the right end of
  * the new runlist, if necessary. Adjust the size of the hole before the
@@ -240,6 +255,12 @@ static inline struct runlist_element *ntfs_rl_append(struct runlist_element *dst
 
 /**
  * ntfs_rl_insert - insert a runlist into another
+ * @dst: destination runlist to insert into
+ * @dsize: number of elements in @dst
+ * @src: source runlist to insert from
+ * @ssize: number of elements in @src
+ * @loc: index in @dst at which to insert @src
+ * @new_size: on success, set to the new combined size
  *
  * Insert the runlist @src before element @loc in the runlist @dst. Merge the
  * left end of the new runlist, if necessary. Adjust the size of the hole
@@ -330,6 +351,12 @@ static inline struct runlist_element *ntfs_rl_insert(struct runlist_element *dst
 
 /**
  * ntfs_rl_replace - overwrite a runlist element with another runlist
+ * @dst: destination runlist to replace in
+ * @dsize: number of elements in @dst
+ * @src: source runlist to replace with
+ * @ssize: number of elements in @src
+ * @loc: index in @dst to replace
+ * @new_size: on success, set to the new combined size
  *
  * Replace the runlist element @dst at @loc with @src. Merge the left and
  * right ends of the inserted runlist, if necessary.
@@ -410,6 +437,12 @@ static inline struct runlist_element *ntfs_rl_replace(struct runlist_element *ds
 
 /**
  * ntfs_rl_split - insert a runlist into the centre of a hole
+ * @dst: destination runlist with a hole
+ * @dsize: number of elements in @dst
+ * @src: source runlist to insert
+ * @ssize: number of elements in @src
+ * @loc: index in @dst of the hole to split
+ * @new_size: on success, set to the new combined size
  *
  * Split the runlist @dst at @loc into two and insert @new in between the two
  * fragments. No merging of runlists is necessary. Adjust the size of the
@@ -453,6 +486,10 @@ static inline struct runlist_element *ntfs_rl_split(struct runlist_element *dst,
 
 /**
  * ntfs_runlists_merge - merge two runlists into one
+ * @d_runlist: destination runlist structure to merge into
+ * @srl: source runlist to merge from
+ * @s_rl_count: number of elements in @srl (0 to auto-detect)
+ * @new_rl_count: on success, set to the new combined runlist size
  *
  * First we sanity check the two runlists @srl and @drl to make sure that they
  * are sensible and can be merged. The runlist @srl must be either after the
@@ -676,6 +713,10 @@ finished:
 
 /**
  * ntfs_mapping_pairs_decompress - convert mapping pairs array to runlist
+ * @vol: ntfs volume
+ * @attr: attribute record whose mapping pairs to decompress
+ * @old_runlist: optional runlist to merge the decompressed runlist into
+ * @new_rl_count: on success, set to the new runlist size
  *
  * It is up to the caller to serialize access to the runlist @old_rl.
  *
@@ -1035,6 +1076,11 @@ static inline int ntfs_get_nr_significant_bytes(const s64 n)
 
 /**
  * ntfs_get_size_for_mapping_pairs - get bytes needed for mapping pairs array
+ * @vol: ntfs volume
+ * @rl: runlist to calculate the mapping pairs array size for
+ * @first_vcn: first vcn which to include in the mapping pairs array
+ * @last_vcn: last vcn which to include in the mapping pairs array
+ * @max_mp_size: maximum size to return (0 or less means unlimited)
  *
  * Walk the locked runlist @rl and calculate the size in bytes of the mapping
  * pairs array corresponding to the runlist @rl, starting at vcn @first_vcn and
@@ -1217,6 +1263,15 @@ err_out:
 
 /**
  * ntfs_mapping_pairs_build - build the mapping pairs array from a runlist
+ * @vol: ntfs volume
+ * @dst: destination buffer to build mapping pairs array into
+ * @dst_len: size of @dst in bytes
+ * @rl: runlist to build the mapping pairs array from
+ * @first_vcn: first vcn which to include in the mapping pairs array
+ * @last_vcn: last vcn which to include in the mapping pairs array
+ * @stop_vcn: on return, set to the first vcn outside the destination buffer
+ * @stop_rl: on return, set to the runlist element where encoding stopped
+ * @de_cluster_count: on return, set to the number of clusters encoded
  *
  * Create the mapping pairs array from the locked runlist @rl, starting at vcn
  * @first_vcn and finishing with vcn @last_vcn and save the array in @dst.

@@ -59,6 +59,11 @@ static int ntfs_collate_ntofs_ulong(struct ntfs_volume *vol,
 
 /**
  * ntfs_collate_ntofs_ulongs - Which of two le32 arrays should be listed first
+ * @vol: ntfs volume
+ * @data1: first ulong array to collate
+ * @data1_len: length in bytes of @data1
+ * @data2: second ulong array to collate
+ * @data2_len: length in bytes of @data2
  *
  * Returns: -1, 0 or 1 depending of how the arrays compare
  */
@@ -87,6 +92,11 @@ static int ntfs_collate_ntofs_ulongs(struct ntfs_volume *vol,
 
 /**
  * ntfs_collate_file_name - Which of two filenames should be listed first
+ * @vol: ntfs volume
+ * @data1: first filename to collate
+ * @data1_len: length in bytes of @data1(unused)
+ * @data2: second filename to collate
+ * @data2_len: length in bytes of @data2(unused)
  */
 static int ntfs_collate_file_name(struct ntfs_volume *vol,
 		const void *data1, const u32 data1_len,

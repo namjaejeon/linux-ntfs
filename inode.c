@@ -1795,12 +1795,12 @@ err_out:
 /**
  * load_attribute_list_mount - load an attribute list into memory
  * @vol:		ntfs volume from which to read
- * @runlist:		runlist of the attribute list
+ * @rl:			runlist of the attribute list
  * @al_start:		destination buffer
  * @size:		size of the destination buffer in bytes
  * @initialized_size:	initialized size of the attribute list
  *
- * Walk the runlist @runlist and load all clusters from it copying them into
+ * Walk the runlist @rl and load all clusters from it copying them into
  * the linear buffer @al. The maximum number of bytes copied to @al is @size
  * bytes. Note, @size does not need to be a multiple of the cluster size. If
  * @initialized_size is less than @size, the region in @al between

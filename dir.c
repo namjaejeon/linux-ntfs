@@ -15,7 +15,7 @@
 #include "index.h"
 #include "reparse.h"
 
-/**
+/*
  * The little endian Unicode string $I30 as a global constant.
  */
 __le16 I30[5] = { cpu_to_le16('$'), cpu_to_le16('I'),

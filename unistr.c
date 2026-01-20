@@ -204,6 +204,11 @@ int ntfs_file_compare_values(const struct file_name_attr *file_name_attr1,
 
 /**
  * ntfs_nlstoucs - convert NLS string to little endian Unicode string
+ * @vol: ntfs volume containing the NLS mapping
+ * @ins: input NLS string to convert
+ * @ins_len: length of input string in bytes
+ * @outs: on success, pointer to allocated output Unicode string
+ * @max_name_len: maximum length of output string in Unicode characters
  *
  * Convert the input string @ins, which is in whatever format the loaded NLS
  * map dictates, into a little endian, 2-byte Unicode string.

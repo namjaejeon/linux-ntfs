@@ -1075,6 +1075,8 @@ mft_unmap_out:
 
 /**
  * load_and_check_logfile - load and check the logfile inode for a volume
+ * @vol: ntfs volume to load the logfile for
+ * @rp: on success, set to the restart page header
  *
  * Return 0 on success or errno on error.
  */
@@ -2412,7 +2414,7 @@ static int ntfs_write_inode(struct inode *vi, struct writeback_control *wbc)
 	return __ntfs_write_inode(vi, wbc->sync_mode == WB_SYNC_ALL);
 }
 
-/**
+/*
  * The complete super operations.
  */
 static const struct super_operations ntfs_sops = {
@@ -2441,8 +2443,12 @@ static void precalc_free_clusters(struct work_struct *work)
 			nr_free);
 }
 
+static struct lock_class_key ntfs_mft_inval_lock_key;
+
 /**
  * ntfs_fill_super - mount an ntfs filesystem
+ * @sb: super block of the device to mount
+ * @fc: filesystem context containing mount options
  *
  * ntfs_fill_super() is called by the VFS to mount the device described by @sb
  * with the mount otions in @data with the NTFS filesystem.
@@ -2454,7 +2460,6 @@ static void precalc_free_clusters(struct work_struct *work)
  * expectedly return an error, but nobody wants to see error messages when in
  * fact this is what is supposed to happen.
  */
-static struct lock_class_key ntfs_mft_inval_lock_key;
 
 static int ntfs_fill_super(struct super_block *sb, struct fs_context *fc)
 {

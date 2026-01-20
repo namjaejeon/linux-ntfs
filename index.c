@@ -276,7 +276,7 @@ static __le64 *ntfs_ie_get_vcn_addr(struct index_entry *ie)
 	return (__le64 *)((u8 *)ie + le16_to_cpu(ie->length) - sizeof(s64));
 }
 
-/**
+/*
  *  Get the subnode vcn to which the index entry refers.
  */
 static s64 ntfs_ie_get_vcn(struct index_entry *ie)
@@ -304,7 +304,7 @@ static int ntfs_ie_end(struct index_entry *ie)
 	return ie->flags & INDEX_ENTRY_END || !ie->length;
 }
 
-/**
+/*
  *  Find the last entry in the index block
  */
 static struct index_entry *ntfs_ie_get_last(struct index_entry *ie, char *ies_end)
@@ -390,7 +390,7 @@ static void ntfs_ie_set_vcn(struct index_entry *ie, s64 vcn)
 	*ntfs_ie_get_vcn_addr(ie) = cpu_to_le64(vcn);
 }
 
-/**
+/*
  *  Insert @ie index entry at @pos entry. Used @ih values should be ok already.
  */
 static void ntfs_ie_insert(struct index_header *ih, struct index_entry *ie,
@@ -555,7 +555,7 @@ static struct index_root *ntfs_ir_lookup2(struct ntfs_inode *ni, __le16 *name, u
 	return ir;
 }
 
-/**
+/*
  * Find a key in the index block.
  */
 static int ntfs_ie_lookup(const void *key, const u32 key_len,
@@ -880,7 +880,7 @@ static struct index_block *ntfs_ib_alloc(s64 ib_vcn, u32 ib_size,
 	return ib;
 }
 
-/**
+/*
  *  Find the median by going through all the entries
  */
 static struct index_entry *ntfs_ie_get_median(struct index_header *ih)
@@ -1286,6 +1286,8 @@ clear_bmp:
 
 /**
  * ntfs_ir_truncate - Truncate index root attribute
+ * @icx: index context
+ * @data_size: new data size for the index root
  */
 static int ntfs_ir_truncate(struct ntfs_index_context *icx, int data_size)
 {
@@ -1313,6 +1315,8 @@ static int ntfs_ir_truncate(struct ntfs_index_context *icx, int data_size)
 
 /**
  * ntfs_ir_make_space - Make more space for the index root attribute
+ * @icx: index context
+ * @data_size: required data size for the index root
  */
 static int ntfs_ir_make_space(struct ntfs_index_context *icx, int data_size)
 {
@@ -1467,6 +1471,8 @@ err_out:
 
 /**
  * ntfs_ib_split - Split an index block
+ * @icx: index context
+ * @ib: index block to split
  */
 static int ntfs_ib_split(struct ntfs_index_context *icx, struct index_block *ib)
 {
@@ -1685,7 +1691,7 @@ out:
 	return ret;
 }
 
-/**
+/*
  *  Used if an empty index block to be deleted has END entry as the parent
  *  in the INDEX_ROOT which is the only one there.
  */
@@ -1707,7 +1713,7 @@ static void ntfs_ir_leafify(struct ntfs_index_context *icx, struct index_header 
 	ntfs_ir_truncate(icx, le32_to_cpu(ih->index_length));
 }
 
-/**
+/*
  *  Used if an empty index block to be deleted has END entry as the parent
  *  in the INDEX_ROOT which is not the only one there.
  */
@@ -2012,6 +2018,8 @@ struct index_entry *ntfs_index_walk_down(struct index_entry *ie, struct ntfs_ind
  * ntfs_index_walk_up - walk up the index tree (root bound) until
  * there is a valid data entry in parent returns the parent entry
  * or NULL if no more parent.
+ * @ie: current index entry
+ * @ictx: index context
  */
 static struct index_entry *ntfs_index_walk_up(struct index_entry *ie,
 		struct ntfs_index_context *ictx)
@@ -2079,6 +2087,9 @@ static struct index_entry *ntfs_index_walk_up(struct index_entry *ie,
  *     +---+---+---+---+---+---+---+---+
  *     | 18| 19| 20| 21| 22| 23| 24|   |
  *     +---+---+---+---+---+---+---+---+
+ *
+ * @ie: current index entry
+ * @ictx: index context
  */
 struct index_entry *ntfs_index_next(struct index_entry *ie, struct ntfs_index_context *ictx)
 {

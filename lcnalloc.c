@@ -118,6 +118,14 @@ static s64 max_empty_bit_range(unsigned char *buf, int size)
 
 /**
  * ntfs_cluster_alloc - allocate clusters on an ntfs volume
+ * @vol:		mounted ntfs volume on which to allocate clusters
+ * @start_vcn:		vcn of the first allocated cluster
+ * @count:		number of clusters to allocate
+ * @start_lcn:		starting lcn at which to allocate the clusters or -1 if none
+ * @zone:		zone from which to allocate (MFT_ZONE or DATA_ZONE)
+ * @is_extension:	if true, the caller is extending an attribute
+ * @is_contig:		if true, require contiguous allocation
+ * @is_dealloc:		if true, the allocation is for deallocation purposes
  *
  * Allocate @count clusters preferably starting at cluster @start_lcn or at the
  * current allocator position if @start_lcn is -1, on the mounted ntfs volume
@@ -168,6 +176,9 @@ static s64 max_empty_bit_range(unsigned char *buf, int size)
  *	      on return.
  *	    - This function takes the volume lcn bitmap lock for writing and
  *	      modifies the bitmap contents.
+ *
+ * Return: Runlist describing the allocated cluster(s) on success, error pointer
+ *         on failure.
  */
 struct runlist_element *ntfs_cluster_alloc(struct ntfs_volume *vol, const s64 start_vcn,
 		const s64 count, const s64 start_lcn,

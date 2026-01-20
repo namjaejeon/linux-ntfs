@@ -30,8 +30,8 @@
 #include "lcnalloc.h"
 #include "mft.h"
 
-/**
- * enum of constants used in the compression code
+/*
+ * Constants used in the compression code
  */
 enum {
 	/* Token types and access mask. */
@@ -53,12 +53,12 @@ enum {
 	NTFS_MAX_CB_SIZE	= 64 * 1024,
 };
 
-/**
+/*
  * ntfs_compression_buffer - one buffer for the decompression engine
  */
 static u8 *ntfs_compression_buffer;
 
-/**
+/*
  * ntfs_cb_lock - mutex lock which protects ntfs_compression_buffer
  */
 static DEFINE_MUTEX(ntfs_cb_lock);
@@ -101,6 +101,8 @@ void free_compression_buffers(void)
 
 /**
  * zero_partial_compressed_page - zero out of bounds compressed page region
+ * @page: page to zero
+ * @initialized_size: initialized size of the attribute
  */
 static void zero_partial_compressed_page(struct page *page,
 		const s64 initialized_size)
@@ -126,6 +128,9 @@ static void zero_partial_compressed_page(struct page *page,
 
 /**
  * handle_bounds_compressed_page - test for&handle out of bounds compressed page
+ * @page: page to check and handle
+ * @i_size: file size
+ * @initialized_size: initialized size of the attribute
  */
 static inline void handle_bounds_compressed_page(struct page *page,
 		const loff_t i_size, const s64 initialized_size)
