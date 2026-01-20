@@ -199,11 +199,15 @@ static int ntfs_parse_param(struct fs_context *fc, struct fs_parameter *param)
 			NVolClearCheckWindowsNames(vol);
 		break;
 	case Opt_acl:
+#ifdef CONFIG_NTFS_FS_POSIX_ACL
 		if (result.boolean)
 			fc->sb_flags |= SB_POSIXACL;
 		else
 			fc->sb_flags &= ~SB_POSIXACL;
 		break;
+#else
+		return -EINVAL;
+#endif
 	case Opt_discard:
 		if (result.boolean)
 			NVolSetDiscard(vol);
