@@ -14,6 +14,7 @@
 
 extern const struct iomap_ops ntfs_write_iomap_ops;
 extern const struct iomap_ops ntfs_read_iomap_ops;
+extern const struct iomap_ops ntfs_seek_iomap_ops;
 extern const struct iomap_ops ntfs_page_mkwrite_iomap_ops;
 extern const struct iomap_ops ntfs_dio_iomap_ops;
 extern const struct iomap_writeback_ops ntfs_writeback_ops;

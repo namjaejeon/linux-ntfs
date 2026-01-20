@@ -344,15 +344,15 @@ int ntfs_setattr(struct user_namespace *mnt_userns, struct dentry *dentry,
 							attr->ia_size - old_size);
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
 				err = iomap_zero_range(vi, old_size, len,
-						       NULL, &ntfs_read_iomap_ops,
+						       NULL, &ntfs_seek_iomap_ops,
 						       &ntfs_iomap_folio_ops, NULL);
 #else
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 15, 0)
 				err = iomap_zero_range(vi, old_size, len,
-							NULL, &ntfs_read_iomap_ops, NULL);
+							NULL, &ntfs_seek_iomap_ops, NULL);
 #else
 				err = iomap_zero_range(vi, old_size, len,
-							NULL, &ntfs_read_iomap_ops);
+							NULL, &ntfs_seek_iomap_ops);
 #endif
 #endif
 			}
@@ -441,99 +441,28 @@ int ntfs_getattr(struct user_namespace *mnt_userns, const struct path *path,
 
 static loff_t ntfs_file_llseek(struct file *file, loff_t offset, int whence)
 {
-	struct inode *vi = file->f_mapping->host;
+	struct inode *inode = file->f_mapping->host;
 
-	if (whence == SEEK_DATA || whence == SEEK_HOLE) {
-		struct ntfs_inode *ni = NTFS_I(vi);
-		struct ntfs_volume *vol = ni->vol;
-		struct runlist_element *rl;
-		s64 vcn;
-		unsigned int vcn_off;
-		loff_t end_off;
-		unsigned long flags;
-		int i;
-
-		inode_lock_shared(vi);
-
-		if (NInoCompressed(ni) || NInoEncrypted(ni))
-			goto error;
-
-		read_lock_irqsave(&ni->size_lock, flags);
-		end_off = ni->data_size;
-		read_unlock_irqrestore(&ni->size_lock, flags);
-
-		if (offset < 0 || offset >= end_off)
-			goto error;
-
-		if (!NInoNonResident(ni)) {
-			if (whence == SEEK_HOLE)
-				offset = end_off;
-			goto found_no_runlist_lock;
-		}
-
-		vcn = NTFS_B_TO_CLU(vol, offset);
-		vcn_off = NTFS_B_TO_CLU_OFS(vol, offset);
-
-		down_read(&ni->runlist.lock);
-		rl = ni->runlist.rl;
-		i = 0;
-
-#ifdef DEBUG
-		ntfs_debug("init:");
-		ntfs_debug_dump_runlist(rl);
-#endif
-		while (1) {
-			if (!rl || !NInoFullyMapped(ni) || rl[i].lcn == LCN_RL_NOT_MAPPED) {
-				int ret;
-
-				up_read(&ni->runlist.lock);
-				ret = ntfs_map_runlist(ni, rl ? rl[i].vcn : 0);
-				if (ret)
-					goto error;
-				down_read(&ni->runlist.lock);
-				rl = ni->runlist.rl;
-#ifdef DEBUG
-				ntfs_debug("mapped:");
-				ntfs_debug_dump_runlist(ni->runlist.rl);
-#endif
-				continue;
-			} else if (rl[i].lcn == LCN_ENOENT) {
-				if (whence == SEEK_DATA) {
-					up_read(&ni->runlist.lock);
-					goto error;
-				} else {
-					offset = end_off;
-					goto found;
-				}
-			} else if (rl[i + 1].vcn > vcn) {
-				if ((whence == SEEK_DATA && (rl[i].lcn >= 0 ||
-						rl[i].lcn == LCN_DELALLOC)) ||
-				   (whence == SEEK_HOLE && rl[i].lcn == LCN_HOLE)) {
-					offset = NTFS_CLU_TO_B(vol, vcn) + vcn_off;
-					if (offset < ni->data_size)
-						goto found;
-				}
-				vcn = rl[i + 1].vcn;
-				vcn_off = 0;
-			}
-			i++;
-		}
-		up_read(&ni->runlist.lock);
-		inode_unlock_shared(vi);
-		return -EIO;
-found:
-		up_read(&ni->runlist.lock);
-found_no_runlist_lock:
-		inode_unlock_shared(vi);
-		return vfs_setpos(file, offset, vi->i_sb->s_maxbytes);
-error:
-		inode_unlock_shared(vi);
-		return -ENXIO;
-	} else {
+	switch (whence) {
+	case SEEK_HOLE:
+		inode_lock_shared(inode);
+		offset = iomap_seek_hole(inode, offset, &ntfs_seek_iomap_ops);
+		inode_unlock_shared(inode);
+		break;
+	case SEEK_DATA:
+		inode_lock_shared(inode);
+		offset = iomap_seek_data(inode, offset, &ntfs_seek_iomap_ops);
+		inode_unlock_shared(inode);
+		break;
+	default:
 		return generic_file_llseek_size(file, offset, whence,
-						vi->i_sb->s_maxbytes,
-						i_size_read(vi));
+						inode->i_sb->s_maxbytes,
+						i_size_read(inode));
 	}
+	if (offset < 0)
+		return offset;
+	return vfs_setpos(file, offset, inode->i_sb->s_maxbytes);
+
 }
 
 static ssize_t ntfs_file_read_iter(struct kiocb *iocb, struct iov_iter *to)
@@ -1154,15 +1083,15 @@ static long ntfs_fallocate(struct file *file, int mode, loff_t offset, loff_t le
 				   end_offset);
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
 			err = iomap_zero_range(vi, offset, to - offset, NULL,
-					       &ntfs_read_iomap_ops,
+					       &ntfs_seek_iomap_ops,
 					       &ntfs_iomap_folio_ops, NULL);
 #else
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 15, 0)
 			err = iomap_zero_range(vi, offset, to - offset, NULL,
-					       &ntfs_read_iomap_ops, NULL);
+					       &ntfs_seek_iomap_ops, NULL);
 #else
 			err = iomap_zero_range(vi, offset, to - offset, NULL,
-					       &ntfs_read_iomap_ops);
+					       &ntfs_seek_iomap_ops);
 #endif
 #endif
 			if (err < 0 || (end_vcn - start_vcn) == 1)
@@ -1175,15 +1104,15 @@ static long ntfs_fallocate(struct file *file, int mode, loff_t offset, loff_t le
 			from = NTFS_CLU_TO_B(vol, end_vcn - 1);
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
 			err = iomap_zero_range(vi, from, end_offset - from, NULL,
-					       &ntfs_read_iomap_ops,
+					       &ntfs_seek_iomap_ops,
 					       &ntfs_iomap_folio_ops, NULL);
 #else
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 15, 0)
 			err = iomap_zero_range(vi, from, end_offset - from, NULL,
-					       &ntfs_read_iomap_ops, NULL);
+					       &ntfs_seek_iomap_ops, NULL);
 #else
 			err = iomap_zero_range(vi, from, end_offset - from, NULL,
-					       &ntfs_read_iomap_ops);
+					       &ntfs_seek_iomap_ops);
 #endif
 #endif
 			if (err < 0 || (end_vcn - start_vcn) == 1)
@@ -1238,15 +1167,15 @@ out:
 					   offset - old_size);
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
 			err = iomap_zero_range(vi, old_size, len, NULL,
-					       &ntfs_read_iomap_ops,
+					       &ntfs_seek_iomap_ops,
 					       &ntfs_iomap_folio_ops, NULL);
 #else
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 15, 0)
 			err = iomap_zero_range(vi, old_size, len, NULL,
-					       &ntfs_read_iomap_ops, NULL);
+					       &ntfs_seek_iomap_ops, NULL);
 #else
 			err = iomap_zero_range(vi, old_size, len, NULL,
-					       &ntfs_read_iomap_ops);
+					       &ntfs_seek_iomap_ops);
 #endif
 #endif
 		}
