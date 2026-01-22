@@ -13,7 +13,6 @@
 #include "aops.h"
 #include "bitmap.h"
 #include "lcnalloc.h"
-#include "malloc.h"
 #include "mft.h"
 #include "ntfs.h"
 
@@ -421,7 +420,7 @@ map_err_out:
 		struct ntfs_inode **tmp;
 		int new_size = (base_ni->nr_extents + 4) * sizeof(struct ntfs_inode *);
 
-		tmp = ntfs_malloc_nofs(new_size);
+		tmp = kvzalloc(new_size, GFP_NOFS);
 		if (unlikely(!tmp)) {
 			ntfs_error(base_ni->vol->sb, "Failed to allocate internal buffer.");
 			destroy_ni = true;
@@ -432,7 +431,7 @@ map_err_out:
 			WARN_ON(!base_ni->ext.extent_ntfs_inos);
 			memcpy(tmp, base_ni->ext.extent_ntfs_inos, new_size -
 					4 * sizeof(struct ntfs_inode *));
-			ntfs_free(base_ni->ext.extent_ntfs_inos);
+			kvfree(base_ni->ext.extent_ntfs_inos);
 		}
 		base_ni->ext.extent_ntfs_inos = tmp;
 	}
@@ -1477,7 +1476,7 @@ static int ntfs_mft_bitmap_extend_allocation_nolock(struct ntfs_volume *vol)
 						es);
 				NVolSetErrors(vol);
 			}
-			ntfs_free(rl2);
+			kvfree(rl2);
 			return PTR_ERR(rl);
 		}
 		mftbmp_ni->runlist.rl = rl;
@@ -1913,7 +1912,7 @@ static int ntfs_mft_data_extend_allocation_nolock(struct ntfs_volume *vol)
 				"Failed to deallocate clusters from the mft data attribute.%s", es);
 			NVolSetErrors(vol);
 		}
-		ntfs_free(rl2);
+		kvfree(rl2);
 		return PTR_ERR(rl);
 	}
 	mft_ni->runlist.rl = rl;

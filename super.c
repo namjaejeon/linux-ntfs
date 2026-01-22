@@ -25,7 +25,6 @@
 #include "ntfs.h"
 #include "ea.h"
 #include "volume.h"
-#include "malloc.h"
 #include "uapi_ntfs.h"
 
 /* A global default upcase table and a corresponding reference count. */
@@ -556,7 +555,7 @@ static char *read_ntfs_boot_sector(struct super_block *sb,
 {
 	char *boot_sector;
 
-	boot_sector = ntfs_malloc_nofs(PAGE_SIZE);
+	boot_sector = kzalloc(PAGE_SIZE, GFP_NOFS);
 	if (!boot_sector)
 		return NULL;
 
@@ -1323,7 +1322,7 @@ static bool load_and_init_attrdef(struct ntfs_volume *vol)
 	i_size = i_size_read(ino);
 	if (i_size <= 0 || i_size > 0x7fffffff)
 		goto iput_failed;
-	vol->attrdef = (struct attr_def *)ntfs_malloc_nofs(i_size);
+	vol->attrdef = (struct attr_def *)kvzalloc(i_size, GFP_NOFS);
 	if (!vol->attrdef)
 		goto iput_failed;
 	index = 0;
@@ -1361,7 +1360,7 @@ read_partial_attrdef_page:
 	iput(ino);
 	return true;
 free_iput_failed:
-	ntfs_free(vol->attrdef);
+	kvfree(vol->attrdef);
 	vol->attrdef = NULL;
 iput_failed:
 	iput(ino);
@@ -1407,7 +1406,7 @@ static bool load_and_init_upcase(struct ntfs_volume *vol)
 	if (!i_size || i_size & (sizeof(__le16) - 1) ||
 			i_size > 64ULL * 1024 * sizeof(__le16))
 		goto iput_upcase_failed;
-	vol->upcase = (__le16 *)ntfs_malloc_nofs(i_size);
+	vol->upcase = (__le16 *)kvzalloc(i_size, GFP_NOFS);
 	if (!vol->upcase)
 		goto iput_upcase_failed;
 	index = 0;
@@ -1457,7 +1456,7 @@ read_partial_upcase_page:
 		if (vol->upcase[i] != default_upcase[i])
 			break;
 	if (i == max) {
-		ntfs_free(vol->upcase);
+		kvfree(vol->upcase);
 		vol->upcase = default_upcase;
 		vol->upcase_len = max;
 		ntfs_nr_upcase_users++;
@@ -1470,7 +1469,7 @@ read_partial_upcase_page:
 	return true;
 iput_upcase_failed:
 	iput(ino);
-	ntfs_free(vol->upcase);
+	kvfree(vol->upcase);
 	vol->upcase = NULL;
 upcase_failed:
 	mutex_lock(&ntfs_lock);
@@ -1676,7 +1675,7 @@ get_ctx_vol_failed:
 		NVolSetErrors(vol);
 	}
 
-	ntfs_free(rp);
+	kvfree(rp);
 	/* Get the root directory inode so we can do path lookups. */
 	vol->root_ino = ntfs_iget(sb, FILE_root);
 	if (IS_ERR(vol->root_ino)) {
@@ -1768,7 +1767,7 @@ iput_lcnbmp_err_out:
 iput_attrdef_err_out:
 	vol->attrdef_size = 0;
 	if (vol->attrdef) {
-		ntfs_free(vol->attrdef);
+		kvfree(vol->attrdef);
 		vol->attrdef = NULL;
 	}
 iput_upcase_err_out:
@@ -1780,7 +1779,7 @@ iput_upcase_err_out:
 	}
 	mutex_unlock(&ntfs_lock);
 	if (vol->upcase) {
-		ntfs_free(vol->upcase);
+		kvfree(vol->upcase);
 		vol->upcase = NULL;
 	}
 iput_mftbmp_err_out:
@@ -1795,7 +1794,7 @@ static void ntfs_volume_free(struct ntfs_volume *vol)
 	/* Throw away the table of attribute definitions. */
 	vol->attrdef_size = 0;
 	if (vol->attrdef) {
-		ntfs_free(vol->attrdef);
+		kvfree(vol->attrdef);
 		vol->attrdef = NULL;
 	}
 	vol->upcase_len = 0;
@@ -1810,7 +1809,7 @@ static void ntfs_volume_free(struct ntfs_volume *vol)
 	}
 
 	if (!ntfs_nr_upcase_users && default_upcase) {
-		ntfs_free(default_upcase);
+		kvfree(default_upcase);
 		default_upcase = NULL;
 	}
 
@@ -1818,7 +1817,7 @@ static void ntfs_volume_free(struct ntfs_volume *vol)
 
 	mutex_unlock(&ntfs_lock);
 	if (vol->upcase) {
-		ntfs_free(vol->upcase);
+		kvfree(vol->upcase);
 		vol->upcase = NULL;
 	}
 
@@ -2655,7 +2654,7 @@ static int ntfs_fill_super(struct super_block *sb, struct fs_context *fc)
 		/* Release the default upcase if it has no users. */
 		mutex_lock(&ntfs_lock);
 		if (!--ntfs_nr_upcase_users && default_upcase) {
-			ntfs_free(default_upcase);
+			kvfree(default_upcase);
 			default_upcase = NULL;
 		}
 		mutex_unlock(&ntfs_lock);
@@ -2714,7 +2713,7 @@ static int ntfs_fill_super(struct super_block *sb, struct fs_context *fc)
 	/* Throw away the table of attribute definitions. */
 	vol->attrdef_size = 0;
 	if (vol->attrdef) {
-		ntfs_free(vol->attrdef);
+		kvfree(vol->attrdef);
 		vol->attrdef = NULL;
 	}
 	vol->upcase_len = 0;
@@ -2725,7 +2724,7 @@ static int ntfs_fill_super(struct super_block *sb, struct fs_context *fc)
 	}
 	mutex_unlock(&ntfs_lock);
 	if (vol->upcase) {
-		ntfs_free(vol->upcase);
+		kvfree(vol->upcase);
 		vol->upcase = NULL;
 	}
 	if (vol->nls_map) {
@@ -2742,7 +2741,7 @@ unl_upcase_iput_tmp_ino_err_out_now:
 	 */
 	mutex_lock(&ntfs_lock);
 	if (!--ntfs_nr_upcase_users && default_upcase) {
-		ntfs_free(default_upcase);
+		kvfree(default_upcase);
 		default_upcase = NULL;
 	}
 

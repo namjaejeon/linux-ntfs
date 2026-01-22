@@ -12,7 +12,6 @@
 
 #include "mft.h"
 #include "attrib.h"
-#include "malloc.h"
 #include "attrlist.h"
 
 /**
@@ -150,7 +149,7 @@ int ntfs_attrlist_entry_add(struct ntfs_inode *ni, struct attr_record *attr)
 	/* Determine size and allocate memory for new attribute list. */
 	entry_len = (sizeof(struct attr_list_entry) + sizeof(__le16) *
 			attr->name_length + 7) & ~7;
-	new_al = ntfs_malloc_nofs(ni->attr_list_size + entry_len);
+	new_al = kvzalloc(ni->attr_list_size + entry_len, GFP_NOFS);
 	if (!new_al)
 		return -ENOMEM;
 
@@ -228,10 +227,10 @@ int ntfs_attrlist_entry_add(struct ntfs_inode *ni, struct attr_record *attr)
 		ni->attr_list_size -= entry_len;
 		goto err_out;
 	}
-	ntfs_free(old_al);
+	kvfree(old_al);
 	return 0;
 err_out:
-	ntfs_free(new_al);
+	kvfree(new_al);
 	return err;
 }
 
@@ -273,7 +272,7 @@ int ntfs_attrlist_entry_rm(struct ntfs_attr_search_ctx *ctx)
 
 	/* Allocate memory for new attribute list. */
 	new_al_len = base_ni->attr_list_size - le16_to_cpu(ale->length);
-	new_al = ntfs_malloc_nofs(new_al_len);
+	new_al = kvzalloc(new_al_len, GFP_NOFS);
 	if (!new_al)
 		return -ENOMEM;
 
@@ -283,7 +282,7 @@ int ntfs_attrlist_entry_rm(struct ntfs_attr_search_ctx *ctx)
 				ale->length), new_al_len - ((u8 *)ale - base_ni->attr_list));
 
 	/* Set new runlist. */
-	ntfs_free(base_ni->attr_list);
+	kvfree(base_ni->attr_list);
 	base_ni->attr_list = new_al;
 	base_ni->attr_list_size = new_al_len;
 

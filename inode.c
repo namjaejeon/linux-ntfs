@@ -10,7 +10,6 @@
 #include <linux/seq_file.h>
 
 #include "lcnalloc.h"
-#include "malloc.h"
 #include "time.h"
 #include "ntfs.h"
 #include "index.h"
@@ -385,7 +384,7 @@ static int ntfs_non_resident_dealloc_clusters(struct ntfs_inode *ni)
 			if (err)
 				ntfs_error(sb,
 					   "Failed to free attribute clusters. Leaving inconsistent metadata.\n");
-			ntfs_free(rl);
+			kvfree(rl);
 		}
 	}
 
@@ -883,7 +882,7 @@ static int ntfs_read_locked_inode(struct inode *vi)
 			ntfs_error(vi->i_sb, "Attr_list_size is zero");
 			goto unm_err_out;
 		}
-		ni->attr_list = ntfs_malloc_nofs(ni->attr_list_size);
+		ni->attr_list = kvzalloc(ni->attr_list_size, GFP_NOFS);
 		if (!ni->attr_list) {
 			ntfs_error(vi->i_sb,
 				"Not enough memory to allocate buffer for attribute list.");
@@ -1959,7 +1958,7 @@ int ntfs_read_inode_mount(struct inode *vi)
 	if (i < sb->s_blocksize)
 		i = sb->s_blocksize;
 
-	m = (struct mft_record *)ntfs_malloc_nofs(i);
+	m = (struct mft_record *)kzalloc(i, GFP_NOFS);
 	if (!m) {
 		ntfs_error(sb, "Failed to allocate buffer for $MFT record 0.");
 		goto err_out;
@@ -2045,7 +2044,7 @@ int ntfs_read_inode_mount(struct inode *vi)
 			ntfs_error(sb, "Attr_list_size is zero");
 			goto put_err_out;
 		}
-		ni->attr_list = ntfs_malloc_nofs(ni->attr_list_size);
+		ni->attr_list = kvzalloc(ni->attr_list_size, GFP_NOFS);
 		if (!ni->attr_list) {
 			ntfs_error(sb, "Not enough memory to allocate buffer for attribute list.");
 			goto put_err_out;
@@ -2072,7 +2071,7 @@ int ntfs_read_inode_mount(struct inode *vi)
 
 			err = load_attribute_list_mount(vol, rl, ni->attr_list, ni->attr_list_size,
 					le64_to_cpu(a->data.non_resident.initialized_size));
-			ntfs_free(rl);
+			kvfree(rl);
 			if (err) {
 				ntfs_error(sb,
 					   "Failed to load attribute list with error code %i.",
@@ -2226,7 +2225,7 @@ int ntfs_read_inode_mount(struct inode *vi)
 				ntfs_error(sb, "ntfs_read_inode() of $MFT failed.\n");
 				ntfs_attr_put_search_ctx(ctx);
 				/* Revert to the safe super operations. */
-				ntfs_free(m);
+				kfree(m);
 				return -1;
 			}
 			/*
@@ -2274,7 +2273,7 @@ int ntfs_read_inode_mount(struct inode *vi)
 	}
 	ntfs_attr_put_search_ctx(ctx);
 	ntfs_debug("Done.");
-	ntfs_free(m);
+	kfree(m);
 
 	/*
 	 * Split the locking rules of the MFT inode from the
@@ -2292,7 +2291,7 @@ put_err_out:
 	ntfs_attr_put_search_ctx(ctx);
 err_out:
 	ntfs_error(sb, "Failed. Marking inode as bad.");
-	ntfs_free(m);
+	kfree(m);
 	return -1;
 }
 
@@ -2300,12 +2299,12 @@ static void __ntfs_clear_inode(struct ntfs_inode *ni)
 {
 	/* Free all alocated memory. */
 	if (NInoNonResident(ni) && ni->runlist.rl) {
-		ntfs_free(ni->runlist.rl);
+		kvfree(ni->runlist.rl);
 		ni->runlist.rl = NULL;
 	}
 
 	if (ni->attr_list) {
-		ntfs_free(ni->attr_list);
+		kvfree(ni->attr_list);
 		ni->attr_list = NULL;
 	}
 
@@ -2403,7 +2402,7 @@ void ntfs_evict_big_inode(struct inode *vi)
 				ntfs_clear_extent_inode(ni->ext.extent_ntfs_inos[i]);
 		}
 		ni->nr_extents = 0;
-		ntfs_free(ni->ext.extent_ntfs_inos);
+		kvfree(ni->ext.extent_ntfs_inos);
 	}
 
 release:
@@ -2431,7 +2430,7 @@ release:
 	}
 #endif
 	kfree(ni->mrec);
-	ntfs_free(ni->target);
+	kvfree(ni->target);
 }
 
 /**
@@ -3081,13 +3080,13 @@ static struct ntfs_inode *ntfs_extent_inode_open(struct ntfs_inode *base_ni,
 	if (!(base_ni->nr_extents & 3)) {
 		i = (base_ni->nr_extents + 4) * sizeof(struct ntfs_inode *);
 
-		extent_nis = ntfs_malloc_nofs(i);
+		extent_nis = kvzalloc(i, GFP_NOFS);
 		if (!extent_nis)
 			goto err_out;
 		if (base_ni->nr_extents) {
 			memcpy(extent_nis, base_ni->ext.extent_ntfs_inos,
 					i - 4 * sizeof(struct ntfs_inode *));
-			ntfs_free(base_ni->ext.extent_ntfs_inos);
+			kvfree(base_ni->ext.extent_ntfs_inos);
 		}
 		base_ni->ext.extent_ntfs_inos = extent_nis;
 	}
@@ -3199,7 +3198,11 @@ int ntfs_inode_add_attrlist(struct ntfs_inode *ni)
 				ctx->attr->name_length + 7) & ~7;
 		al_len += ale_size;
 
-		aln = ntfs_realloc_nofs(al, al_len, al_len-ale_size);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)
+		aln = kvrealloc(al, al_len, GFP_NOFS);
+#else
+		aln = kvrealloc(al, al_len - ale_size, al_len, GFP_NOFS);
+#endif
 		if (!aln) {
 			err = -ENOMEM;
 			ntfs_error(ni->vol->sb, "Failed to realloc %d bytes", al_len);
@@ -3322,7 +3325,7 @@ rollback:
 put_err_out:
 	ntfs_attr_put_search_ctx(ctx);
 err_out:
-	ntfs_free(al);
+	kvfree(al);
 	unmap_mft_record(ni);
 	return err;
 }
@@ -3371,28 +3374,36 @@ int ntfs_inode_close(struct ntfs_inode *ni)
 				(base_ni->nr_extents - i - 1) *
 				sizeof(struct ntfs_inode *));
 		/* Buffer should be for multiple of four extents. */
-		if ((--base_ni->nr_extents) & 3) {
-			i = -1;
+		if ((--base_ni->nr_extents) & 3)
 			break;
-		}
 		/*
 		 * ElectricFence is unhappy with realloc(x,0) as free(x)
 		 * thus we explicitly separate these two cases.
 		 */
 		if (base_ni->nr_extents) {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)
 			/* Resize the memory buffer. */
-			tmp_nis = ntfs_realloc_nofs(tmp_nis, base_ni->nr_extents *
-					sizeof(struct ntfs_inode *), base_ni->nr_extents *
-					sizeof(struct ntfs_inode *));
+			tmp_nis = kvrealloc(tmp_nis, base_ni->nr_extents *
+					sizeof(struct ntfs_inode *), GFP_NOFS);
 			/* Ignore errors, they don't really matter. */
 			if (tmp_nis)
 				base_ni->ext.extent_ntfs_inos = tmp_nis;
+#else
+			struct ntfs_inode **new_nis;
+			size_t new_size = base_ni->nr_extents * sizeof(struct ntfs_inode *);
+
+			/* Resize the memory buffer. */
+			new_nis = kmalloc(new_size, GFP_NOFS);
+			if (new_nis) {
+				memcpy(new_nis, tmp_nis, new_size);
+				base_ni->ext.extent_ntfs_inos = new_nis;
+				kvfree(tmp_nis);
+			}
+#endif
 		} else if (tmp_nis) {
-			ntfs_free(tmp_nis);
+			kvfree(tmp_nis);
 			base_ni->ext.extent_ntfs_inos = NULL;
 		}
-		/* Allow for error checking. */
-		i = -1;
 		break;
 	}
 
@@ -3400,7 +3411,7 @@ int ntfs_inode_close(struct ntfs_inode *ni)
 		ntfs_error(ni->vol->sb, "Releasing dirty inode %lld!\n",
 				(long long)ni->mft_no);
 	if (NInoAttrList(ni) && ni->attr_list)
-		ntfs_free(ni->attr_list);
+		kvfree(ni->attr_list);
 	ntfs_destroy_ext_inode(ni);
 	err = 0;
 	ntfs_debug("\n");
@@ -3419,7 +3430,7 @@ void ntfs_destroy_ext_inode(struct ntfs_inode *ni)
 		ntfs_error(ni->vol->sb, "Releasing dirty ext inode %lld!\n",
 				(long long)ni->mft_no);
 	if (NInoAttrList(ni) && ni->attr_list)
-		ntfs_free(ni->attr_list);
+		kvfree(ni->attr_list);
 	kfree(ni->mrec);
 	kmem_cache_free(ntfs_inode_cache, ni);
 }

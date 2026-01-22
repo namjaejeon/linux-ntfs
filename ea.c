@@ -18,7 +18,6 @@
 #include "index.h"
 #include "dir.h"
 #include "ea.h"
-#include "malloc.h"
 
 static int ntfs_write_ea(struct ntfs_inode *ni, int type, char *value, s64 ea_off,
 		s64 ea_size, bool need_truncate)
@@ -125,12 +124,12 @@ static int ntfs_get_ea(struct inode *inode, const char *name, size_t name_len,
 	p_ea_info = ntfs_attr_readall(ni, AT_EA_INFORMATION, NULL, 0,
 			&ea_info_size);
 	if (!p_ea_info || ea_info_size != sizeof(struct ea_information)) {
-		ntfs_free(p_ea_info);
+		kvfree(p_ea_info);
 		return -ENODATA;
 	}
 
 	ea_info_qlen = le16_to_cpu(p_ea_info->ea_query_length);
-	ntfs_free(p_ea_info);
+	kvfree(p_ea_info);
 
 	ea_buf = ntfs_attr_readall(ni, AT_EA, NULL, 0, &all_ea_size);
 	if (!ea_buf)
@@ -142,7 +141,7 @@ static int ntfs_get_ea(struct inode *inode, const char *name, size_t name_len,
 		p_ea = (struct ea_attr *)&ea_buf[ea_off];
 		ea_value_len = le16_to_cpu(p_ea->ea_value_length);
 		if (!buffer) {
-			ntfs_free(ea_buf);
+			kvfree(ea_buf);
 			return ea_value_len;
 		}
 
@@ -153,13 +152,13 @@ static int ntfs_get_ea(struct inode *inode, const char *name, size_t name_len,
 
 		memcpy(buffer, &p_ea->ea_name[p_ea->ea_name_length + 1],
 				ea_value_len);
-		ntfs_free(ea_buf);
+		kvfree(ea_buf);
 		return ea_value_len;
 	}
 
 	err = -ENODATA;
 free_ea_buf:
-	ntfs_free(ea_buf);
+	kvfree(ea_buf);
 	return err;
 }
 
@@ -208,14 +207,14 @@ static int ntfs_set_ea(struct inode *inode, const char *name, size_t name_len,
 		ea_buf = ntfs_attr_readall(ni, AT_EA, NULL, 0, &all_ea_size);
 		if (!ea_buf) {
 			ea_info_qsize = 0;
-			ntfs_free(p_ea_info);
+			kvfree(p_ea_info);
 			goto create_ea_info;
 		}
 
 		ea_info_qsize = le32_to_cpu(p_ea_info->ea_query_length);
 	} else {
 create_ea_info:
-		p_ea_info = ntfs_malloc_nofs(sizeof(struct ea_information));
+		p_ea_info = kzalloc(sizeof(struct ea_information), GFP_NOFS);
 		if (!p_ea_info)
 			return -ENOMEM;
 
@@ -283,7 +282,7 @@ create_ea_info:
 			goto out;
 		}
 	}
-	ntfs_free(ea_buf);
+	kvfree(ea_buf);
 
 alloc_new_ea:
 	ea_buf = kzalloc(new_ea_size, GFP_NOFS);
@@ -344,8 +343,8 @@ out:
 	else
 		NInoClearHasEA(ni);
 
-	ntfs_free(ea_buf);
-	ntfs_free(p_ea_info);
+	kvfree(ea_buf);
+	kvfree(p_ea_info);
 
 	return err;
 }
@@ -504,8 +503,8 @@ ssize_t ntfs_listxattr(struct dentry *dentry, char *buffer, size_t size)
 
 out:
 	mutex_unlock(&NTFS_I(inode)->mrec_lock);
-	ntfs_free(ea_info);
-	ntfs_free(ea_buf);
+	kvfree(ea_info);
+	kvfree(ea_buf);
 
 	return err ? err : ret;
 }

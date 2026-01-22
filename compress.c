@@ -25,7 +25,6 @@
 #include "inode.h"
 #include "debug.h"
 #include "ntfs.h"
-#include "malloc.h"
 #include "aops.h"
 #include "lcnalloc.h"
 #include "mft.h"
@@ -1132,7 +1131,7 @@ static unsigned int ntfs_compress_block(const char *inbuf, const int bufsize,
 	int tag;    /* current value of tag */
 	int ntag;   /* count of bits still undefined in tag */
 
-	pctx = ntfs_malloc_nofs(sizeof(struct COMPRESS_CONTEXT));
+	pctx = kvzalloc(sizeof(struct COMPRESS_CONTEXT), GFP_NOFS);
 	if (!pctx)
 		return -ENOMEM;
 
@@ -1295,7 +1294,7 @@ static unsigned int ntfs_compress_block(const char *inbuf, const int bufsize,
 	 * Free the compression context and return the total number of bytes
 	 * written to 'outbuf'.
 	 */
-	ntfs_free(pctx);
+	kvfree(pctx);
 	return xout;
 }
 
@@ -1425,7 +1424,7 @@ static int ntfs_write_cb(struct ntfs_inode *ni, loff_t pos, struct page **pages,
 		err = PTR_ERR(rl);
 		if (ntfs_cluster_free_from_rl(vol, rlc))
 			ntfs_error(vol->sb, "Failed to free hot clusters.");
-		ntfs_free(rlc);
+		kvfree(rlc);
 		goto out;
 	}
 

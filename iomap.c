@@ -13,7 +13,6 @@
 #include "attrib.h"
 #include "mft.h"
 #include "ntfs.h"
-#include "malloc.h"
 #include "iomap.h"
 
 /*
@@ -557,7 +556,8 @@ remap_rl:
 		if (lcn <= LCN_HOLE) {
 			size_t new_rl_count;
 
-			rlc = ntfs_malloc_nofs(sizeof(struct runlist_element) * 2);
+			rlc = kmalloc(sizeof(struct runlist_element) * 2,
+					GFP_NOFS);
 			if (!rlc) {
 				up_write(&ni->runlist.lock);
 				mutex_unlock(&ni->mrec_lock);
@@ -578,7 +578,7 @@ remap_rl:
 				ntfs_error(vol->sb, "Failed to merge runlists");
 				up_write(&ni->runlist.lock);
 				mutex_unlock(&ni->mrec_lock);
-				ntfs_free(rlc);
+				kvfree(rlc);
 				return PTR_ERR(rl);
 			}
 

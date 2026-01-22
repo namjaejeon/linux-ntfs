@@ -15,7 +15,6 @@
 
 #include "lcnalloc.h"
 #include "bitmap.h"
-#include "malloc.h"
 #include "aops.h"
 #include "ntfs.h"
 
@@ -394,7 +393,7 @@ struct runlist_element *ntfs_cluster_alloc(struct ntfs_volume *vol, const s64 st
 			/*
 			 * Allocate more memory if needed, including space for
 			 * the terminator element.
-			 * ntfs_malloc_nofs() operates on whole pages only.
+			 * kvzalloc() operates on whole pages only.
 			 */
 			if ((rlpos + 2) * sizeof(*rl) > rlsize) {
 				struct runlist_element *rl2;
@@ -403,14 +402,14 @@ struct runlist_element *ntfs_cluster_alloc(struct ntfs_volume *vol, const s64 st
 				if (!rl)
 					ntfs_debug("First free bit is at s64 0x%llx.",
 							lcn + bmp_pos);
-				rl2 = ntfs_malloc_nofs(rlsize + (int)PAGE_SIZE);
+				rl2 = kvzalloc(rlsize + PAGE_SIZE, GFP_NOFS);
 				if (unlikely(!rl2)) {
 					err = -ENOMEM;
 					ntfs_error(vol->sb, "Failed to allocate memory.");
 					goto out;
 				}
 				memcpy(rl2, rl, rlsize);
-				ntfs_free(rl);
+				kvfree(rl);
 				rl = rl2;
 				rlsize += PAGE_SIZE;
 				ntfs_debug("Reallocated memory, rlsize 0x%x.",
@@ -795,7 +794,7 @@ out:
 			NVolSetErrors(vol);
 		}
 		/* Free the runlist. */
-		ntfs_free(rl);
+		kvfree(rl);
 	} else if (err == -ENOSPC)
 		ntfs_debug("No space left at all, err = -ENOSPC, first free lcn = 0x%llx.",
 				vol->data1_zone_pos);

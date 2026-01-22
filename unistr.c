@@ -6,7 +6,6 @@
  */
 
 #include "ntfs.h"
-#include "malloc.h"
 
 /*
  * IMPORTANT
@@ -419,8 +418,8 @@ static u32 ntfs_ucsnlen(const __le16 *s, u32 maxlen)
  * @maxlen:	maximum length of string @s
  *
  * Return a pointer to a new little endian Unicode string which is a duplicate
- * of the string s.  Memory for the new string is obtained with ntfs_malloc(3),
- * and can be freed with free(3).
+ * of the string s.  Memory for the new string is obtained with kmalloc,
+ * and can be freed with kfree.
  *
  * A maximum of @maxlen Unicode characters are copied and a terminating
  * (__le16)'\0' little endian Unicode character is added.
@@ -436,7 +435,7 @@ __le16 *ntfs_ucsndup(const __le16 *s, u32 maxlen)
 	u32 len;
 
 	len = ntfs_ucsnlen(s, maxlen);
-	dst = ntfs_malloc_nofs((len + 1) * sizeof(__le16));
+	dst = kmalloc((len + 1) * sizeof(__le16), GFP_NOFS);
 	if (dst) {
 		memcpy(dst, s, len * sizeof(__le16));
 		dst[len] = cpu_to_le16(L'\0');

@@ -16,7 +16,6 @@
  * Copyright (c) 2007-2022 Jean-Pierre Andre
  */
 
-#include "malloc.h"
 #include "ntfs.h"
 #include "attrib.h"
 
@@ -67,12 +66,12 @@ struct runlist_element *ntfs_rl_realloc(struct runlist_element *rl,
 {
 	struct runlist_element *new_rl;
 
-	old_size = PAGE_ALIGN(old_size * sizeof(*rl));
-	new_size = PAGE_ALIGN(new_size * sizeof(*rl));
+	old_size = old_size * sizeof(*rl);
+	new_size = new_size * sizeof(*rl);
 	if (old_size == new_size)
 		return rl;
 
-	new_rl = ntfs_malloc_nofs(new_size);
+	new_rl = kvzalloc(new_size, GFP_NOFS);
 	if (unlikely(!new_rl))
 		return ERR_PTR(-ENOMEM);
 
@@ -80,7 +79,7 @@ struct runlist_element *ntfs_rl_realloc(struct runlist_element *rl,
 		if (unlikely(old_size > new_size))
 			old_size = new_size;
 		memcpy(new_rl, rl, old_size);
-		ntfs_free(rl);
+		kvfree(rl);
 	}
 	return new_rl;
 }
@@ -111,18 +110,17 @@ static inline struct runlist_element *ntfs_rl_realloc_nofail(struct runlist_elem
 {
 	struct runlist_element *new_rl;
 
-	old_size = PAGE_ALIGN(old_size * sizeof(*rl));
-	new_size = PAGE_ALIGN(new_size * sizeof(*rl));
+	old_size = old_size * sizeof(*rl);
+	new_size = new_size * sizeof(*rl);
 	if (old_size == new_size)
 		return rl;
 
-	new_rl = ntfs_malloc_nofs_nofail(new_size);
-
+	new_rl = kvmalloc(new_size, GFP_NOFS | __GFP_NOFAIL);
 	if (likely(rl != NULL)) {
 		if (unlikely(old_size > new_size))
 			old_size = new_size;
 		memcpy(new_rl, rl, old_size);
-		ntfs_free(rl);
+		kvfree(rl);
 	}
 	return new_rl;
 }
@@ -612,7 +610,7 @@ struct runlist_element *ntfs_runlists_merge(struct runlist *d_runlist,
 		ntfs_error(NULL, "Merge failed.");
 		return drl;
 	}
-	ntfs_free(srl);
+	kvfree(srl);
 	if (marker) {
 		ntfs_debug("Triggering marker code.");
 		for (ds = dend; drl[ds].length; ds++)
@@ -725,7 +723,7 @@ struct runlist_element *ntfs_mapping_pairs_decompress(const struct ntfs_volume *
 	/* Current position in runlist array. */
 	rlpos = 0;
 	/* Allocate first page and set current runlist size to one page. */
-	rl = ntfs_malloc_nofs(rlsize = PAGE_SIZE);
+	rl = kvzalloc(rlsize = PAGE_SIZE, GFP_NOFS);
 	if (unlikely(!rl))
 		return ERR_PTR(-ENOMEM);
 	/* Insert unmapped starting element if necessary. */
@@ -738,19 +736,19 @@ struct runlist_element *ntfs_mapping_pairs_decompress(const struct ntfs_volume *
 	while (buf < attr_end && *buf) {
 		/*
 		 * Allocate more memory if needed, including space for the
-		 * not-mapped and terminator elements. ntfs_malloc_nofs()
+		 * not-mapped and terminator elements. kvzalloc()
 		 * operates on whole pages only.
 		 */
 		if (((rlpos + 3) * sizeof(*rl)) > rlsize) {
 			struct runlist_element *rl2;
 
-			rl2 = ntfs_malloc_nofs(rlsize + (int)PAGE_SIZE);
+			rl2 = kvzalloc(rlsize + PAGE_SIZE, GFP_NOFS);
 			if (unlikely(!rl2)) {
-				ntfs_free(rl);
+				kvfree(rl);
 				return ERR_PTR(-ENOMEM);
 			}
 			memcpy(rl2, rl, rlsize);
-			ntfs_free(rl);
+			kvfree(rl);
 			rl = rl2;
 			rlsize += PAGE_SIZE;
 		}
@@ -905,13 +903,13 @@ mpa_err:
 	new_rl = ntfs_runlists_merge(old_runlist, rl, rlpos + 1, new_rl_count);
 	if (!IS_ERR(new_rl))
 		return new_rl;
-	ntfs_free(rl);
+	kvfree(rl);
 	ntfs_error(vol->sb, "Failed to merge runlists.");
 	return new_rl;
 io_error:
 	ntfs_error(vol->sb, "Corrupt attribute.");
 err_out:
-	ntfs_free(rl);
+	kvfree(rl);
 	return ERR_PTR(-EIO);
 }
 
@@ -1677,7 +1675,7 @@ merge_src_rle:
 	new_2nd_cnt = src_cnt;
 	new_cnt = new_1st_cnt + new_2nd_cnt + new_3rd_cnt;
 	new_cnt += dst_rl_split.lcn >= LCN_HOLE ? 1 : 0;
-	new_rl = ntfs_malloc_nofs(new_cnt * sizeof(*new_rl));
+	new_rl = kvzalloc(new_cnt * sizeof(*new_rl), GFP_NOFS);
 	if (!new_rl)
 		return ERR_PTR(-ENOMEM);
 
@@ -1717,8 +1715,8 @@ merge_src_rle:
 	}
 	*new_rl_cnt = new_1st_cnt + new_2nd_cnt + new_3rd_cnt;
 
-	ntfs_free(dst_rl);
-	ntfs_free(src_rl_origin);
+	kvfree(dst_rl);
+	kvfree(src_rl_origin);
 	return new_rl;
 }
 
@@ -1761,14 +1759,15 @@ struct runlist_element *ntfs_rl_punch_hole(struct runlist_element *dst_rl, int d
 
 	punch_cnt = (int)(e_rl - s_rl) + 1;
 
-	*punch_rl = ntfs_malloc_nofs((punch_cnt + 1) * sizeof(struct runlist_element));
+	*punch_rl = kvzalloc((punch_cnt + 1) * sizeof(struct runlist_element),
+			GFP_NOFS);
 	if (!*punch_rl)
 		return ERR_PTR(-ENOMEM);
 
 	new_cnt = dst_cnt - (int)(e_rl - s_rl + 1) + 3;
-	new_rl = ntfs_malloc_nofs(new_cnt * sizeof(struct runlist_element));
+	new_rl = kvzalloc(new_cnt * sizeof(struct runlist_element), GFP_NOFS);
 	if (!new_rl) {
-		ntfs_free(*punch_rl);
+		kvfree(*punch_rl);
 		*punch_rl = NULL;
 		return ERR_PTR(-ENOMEM);
 	}
@@ -1868,7 +1867,7 @@ struct runlist_element *ntfs_rl_punch_hole(struct runlist_element *dst_rl, int d
 	/* punch_cnt elements of dst are replaced with one hole */
 	*new_rl_cnt = dst_cnt - (punch_cnt - (int)begin_split - (int)end_split) +
 		1 - merge_cnt;
-	ntfs_free(dst_rl);
+	kvfree(dst_rl);
 	return new_rl;
 }
 
@@ -1910,14 +1909,15 @@ struct runlist_element *ntfs_rl_collapse_range(struct runlist_element *dst_rl, i
 	one_split_3 = e_rl == s_rl && begin_split && end_split ? true : false;
 
 	punch_cnt = (int)(e_rl - s_rl) + 1;
-	*punch_rl = ntfs_malloc_nofs((punch_cnt + 1) * sizeof(struct runlist_element));
+	*punch_rl = kvzalloc((punch_cnt + 1) * sizeof(struct runlist_element),
+			GFP_NOFS);
 	if (!*punch_rl)
 		return ERR_PTR(-ENOMEM);
 
 	new_cnt = dst_cnt - (int)(e_rl - s_rl + 1) + 3;
-	new_rl = ntfs_malloc_nofs(new_cnt * sizeof(struct runlist_element));
+	new_rl = kvzalloc(new_cnt * sizeof(struct runlist_element), GFP_NOFS);
 	if (!new_rl) {
-		ntfs_free(*punch_rl);
+		kvfree(*punch_rl);
 		*punch_rl = NULL;
 		return ERR_PTR(-ENOMEM);
 	}
@@ -2006,6 +2006,6 @@ struct runlist_element *ntfs_rl_collapse_range(struct runlist_element *dst_rl, i
 	*new_rl_cnt = dst_cnt - (punch_cnt - (int)begin_split - (int)end_split) -
 		merge_cnt;
 
-	ntfs_free(dst_rl);
+	kvfree(dst_rl);
 	return new_rl;
 }

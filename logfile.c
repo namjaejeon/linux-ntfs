@@ -10,7 +10,6 @@
 #include "attrib.h"
 #include "aops.h"
 #include "logfile.h"
-#include "malloc.h"
 #include "ntfs.h"
 
 /**
@@ -344,7 +343,7 @@ static int ntfs_check_and_load_restart_page(struct inode *vi,
 	 * Allocate a buffer to store the whole restart page so we can multi
 	 * sector transfer deprotect it.
 	 */
-	trp = ntfs_malloc_nofs(le32_to_cpu(rp->system_page_size));
+	trp = kvzalloc(le32_to_cpu(rp->system_page_size), GFP_NOFS);
 	if (!trp) {
 		ntfs_error(vi->i_sb, "Failed to allocate memory for LogFile restart page buffer.");
 		return -ENOMEM;
@@ -450,7 +449,7 @@ static int ntfs_check_and_load_restart_page(struct inode *vi,
 		*wrp = trp;
 	else {
 err_out:
-		ntfs_free(trp);
+		kvfree(trp);
 	}
 	return err;
 }
@@ -462,7 +461,7 @@ err_out:
  *
  * Check the LogFile journal for consistency and return 'true' if it is
  * consistent and 'false' if not.  On success, the current restart page is
- * returned in *@rp.  Caller must call ntfs_free(*@rp) when finished with it.
+ * returned in *@rp.  Caller must call kvfree(*@rp) when finished with it.
  *
  * At present we only check the two restart pages and ignore the log record
  * pages.
@@ -661,12 +660,12 @@ is_empty:
 		 */
 		if (rstr2_lsn > rstr1_lsn) {
 			ntfs_debug("Using second restart page as it is more recent.");
-			ntfs_free(rstr1_ph);
+			kvfree(rstr1_ph);
 			rstr1_ph = rstr2_ph;
 			/* rstr1_lsn = rstr2_lsn; */
 		} else {
 			ntfs_debug("Using first restart page as it is more recent.");
-			ntfs_free(rstr2_ph);
+			kvfree(rstr2_ph);
 		}
 		rstr2_ph = NULL;
 	}
@@ -674,12 +673,12 @@ is_empty:
 	if (rp)
 		*rp = rstr1_ph;
 	else
-		ntfs_free(rstr1_ph);
+		kvfree(rstr1_ph);
 	ntfs_debug("Done.");
 	return true;
 err_out:
 	if (rstr1_ph)
-		ntfs_free(rstr1_ph);
+		kvfree(rstr1_ph);
 	return false;
 }
 
@@ -742,7 +741,7 @@ map_vcn:
 		rl++;
 
 	err = -ENOMEM;
-	empty_buf = ntfs_malloc_nofs(vol->cluster_size);
+	empty_buf = kvzalloc(vol->cluster_size, GFP_NOFS);
 	if (!empty_buf)
 		goto err;
 
@@ -769,7 +768,7 @@ map_vcn:
 		lcn = rl->lcn;
 		if (unlikely(lcn == LCN_RL_NOT_MAPPED)) {
 			vcn = rl->vcn;
-			ntfs_free(empty_buf);
+			kvfree(empty_buf);
 			goto map_vcn;
 		}
 		/* If this run is not valid abort with an error. */
@@ -834,7 +833,7 @@ dirty_err:
 	NVolSetErrors(vol);
 	err = -EIO;
 err:
-	ntfs_free(empty_buf);
+	kvfree(empty_buf);
 	kfree(ra);
 	up_write(&log_ni->runlist.lock);
 	ntfs_error(sb, "Failed to fill LogFile with 0xff bytes (error %d).",

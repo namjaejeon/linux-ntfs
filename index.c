@@ -17,7 +17,6 @@
 #include "collate.h"
 #include "index.h"
 #include "ntfs.h"
-#include "malloc.h"
 #include "attrlist.h"
 
 /*
@@ -175,7 +174,7 @@ int ntfs_icx_ib_sync_write(struct ntfs_index_context *icx)
 
 	ret = ntfs_ib_write(icx, icx->ib);
 	if (!ret) {
-		ntfs_free(icx->ib);
+		kvfree(icx->ib);
 		icx->ib = NULL;
 		icx->ib_dirty = false;
 	} else {
@@ -230,7 +229,7 @@ static void ntfs_index_ctx_free(struct ntfs_index_context *icx)
 	if (!icx->is_in_root) {
 		if (icx->ib_dirty)
 			ntfs_ib_write(icx, icx->ib);
-		ntfs_free(icx->ib);
+		kvfree(icx->ib);
 		icx->ib = NULL;
 	}
 
@@ -408,15 +407,9 @@ static void ntfs_ie_insert(struct index_header *ih, struct index_entry *ie,
 
 static struct index_entry *ntfs_ie_dup(struct index_entry *ie)
 {
-	struct index_entry *dup;
-
 	ntfs_debug("Entering\n");
 
-	dup = ntfs_malloc_nofs(le16_to_cpu(ie->length));
-	if (dup)
-		memcpy(dup, ie, le16_to_cpu(ie->length));
-
-	return dup;
+	return kmemdup(ie, le16_to_cpu(ie->length), GFP_NOFS);
 }
 
 static struct index_entry *ntfs_ie_dup_novcn(struct index_entry *ie)
@@ -429,9 +422,8 @@ static struct index_entry *ntfs_ie_dup_novcn(struct index_entry *ie)
 	if (ie->flags & INDEX_ENTRY_NODE)
 		size -= sizeof(s64);
 
-	dup = ntfs_malloc_nofs(size);
+	dup = kmemdup(ie, size, GFP_NOFS);
 	if (dup) {
-		memcpy(dup, ie, size);
 		dup->flags &= ~INDEX_ENTRY_NODE;
 		dup->length = cpu_to_le16(size);
 	}
@@ -794,7 +786,7 @@ int ntfs_index_lookup(const void *key, const int key_len, struct ntfs_index_cont
 		goto err_out;
 	}
 
-	ib = ntfs_malloc_nofs(icx->block_size);
+	ib = kvzalloc(icx->block_size, GFP_NOFS);
 	if (!ib) {
 		err = -ENOMEM;
 		goto err_out;
@@ -838,7 +830,7 @@ err_out:
 		ntfs_attr_put_search_ctx(icx->actx);
 		icx->actx = NULL;
 	}
-	ntfs_free(ib);
+	kvfree(ib);
 	if (!err)
 		err = -EIO;
 	return err;
@@ -859,7 +851,7 @@ static struct index_block *ntfs_ib_alloc(s64 ib_vcn, u32 ib_size,
 
 	ntfs_debug("Entering ib_vcn = %lld ib_size = %u\n", ib_vcn, ib_size);
 
-	ib = ntfs_malloc_nofs(ib_size);
+	ib = kvzalloc(ib_size, GFP_NOFS);
 	if (!ib)
 		return NULL;
 
@@ -1040,7 +1032,7 @@ out:
 	if (ntfs_ibm_set(icx, vcn))
 		vcn = (s64)-1;
 
-	ntfs_free(bm);
+	kvfree(bm);
 	return vcn;
 }
 
@@ -1118,7 +1110,7 @@ static int ntfs_ib_copy_tail(struct ntfs_index_context *icx, struct index_block 
 			le32_to_cpu(dst->index.entries_offset));
 	ret = ntfs_ib_write(icx, dst);
 
-	ntfs_free(dst);
+	kvfree(dst);
 	return ret;
 }
 
@@ -1274,7 +1266,7 @@ retry:
 	ntfs_ie_set_vcn(ie, new_ib_vcn);
 
 err_out:
-	ntfs_free(ib);
+	kvfree(ib);
 	if (ctx)
 		ntfs_attr_put_search_ctx(ctx);
 out:
@@ -1340,8 +1332,7 @@ static int ntfs_ie_add_vcn(struct index_entry **ie)
 	struct index_entry *p, *old = *ie;
 
 	old->length = cpu_to_le16(le16_to_cpu(old->length) + sizeof(s64));
-	p = ntfs_realloc_nofs(old, le16_to_cpu(old->length),
-			le16_to_cpu(old->length) - sizeof(s64));
+	p = krealloc(old, le16_to_cpu(old->length), GFP_NOFS);
 	if (!p)
 		return -ENOMEM;
 
@@ -1375,7 +1366,7 @@ static int ntfs_ih_insert(struct index_header *ih, struct index_entry *orig_ie, 
 	ntfs_ie_insert(ih, ie, ie_node);
 	ntfs_ie_set_vcn(ie_node, old_vcn);
 out:
-	ntfs_free(ie);
+	kfree(ie);
 	return ret;
 }
 
@@ -1436,7 +1427,7 @@ static int ntfs_ib_insert(struct ntfs_index_context *icx, struct index_entry *ie
 
 	ntfs_debug("Entering\n");
 
-	ib = ntfs_malloc_nofs(icx->block_size);
+	ib = kvzalloc(icx->block_size, GFP_NOFS);
 	if (!ib)
 		return -ENOMEM;
 
@@ -1461,7 +1452,7 @@ static int ntfs_ib_insert(struct ntfs_index_context *icx, struct index_entry *ie
 	err = ntfs_ib_write(icx, ib);
 
 err_out:
-	ntfs_free(ib);
+	kvfree(ib);
 	return err;
 }
 
@@ -1516,7 +1507,7 @@ resplit:
 			ib = si->ib;
 			goto resplit;
 		} else if (ret) {
-			ntfs_free(si->ib);
+			kvfree(si->ib);
 			kfree(si);
 			ntfs_ibm_clear(icx, new_vcn);
 			goto out;
@@ -1530,7 +1521,7 @@ out:
 	while (!list_empty(&ntfs_cut_tail_list)) {
 		si = list_last_entry(&ntfs_cut_tail_list, struct split_info, entry);
 		ntfs_ibm_clear(icx, si->new_vcn);
-		ntfs_free(si->ib);
+		kvfree(si->ib);
 		list_del(&si->entry);
 		kfree(si);
 		if (!ret)
@@ -1613,7 +1604,7 @@ int ntfs_index_add_filename(struct ntfs_inode *ni, struct file_name_attr *fn, u6
 		sizeof(struct file_name_attr);
 	ie_size = (sizeof(struct index_entry_header) + fn_size + 7) & ~7;
 
-	ie = ntfs_malloc_nofs(ie_size);
+	ie = kzalloc(ie_size, GFP_NOFS);
 	if (!ie)
 		return -ENOMEM;
 
@@ -1637,7 +1628,7 @@ int ntfs_index_add_filename(struct ntfs_inode *ni, struct file_name_attr *fn, u6
 	err = ntfs_ie_add(icx, ie);
 	ntfs_index_ctx_put(icx);
 out:
-	ntfs_free(ie);
+	kfree(ie);
 	return err;
 }
 
@@ -1681,7 +1672,7 @@ static int ntfs_ih_takeout(struct ntfs_index_context *icx, struct index_header *
 
 	ret = ntfs_ie_add(icx, ie_roam);
 out:
-	ntfs_free(ie_roam);
+	kfree(ie_roam);
 	return ret;
 }
 
@@ -1747,7 +1738,7 @@ static int ntfs_index_rm_leaf(struct ntfs_index_context *icx)
 	if (ntfs_icx_parent_vcn(icx) == VCN_INDEX_ROOT_PARENT)
 		parent_ih = &icx->ir->index;
 	else {
-		ib = ntfs_malloc_nofs(icx->block_size);
+		ib = kvzalloc(icx->block_size, GFP_NOFS);
 		if (!ib)
 			return -ENOMEM;
 
@@ -1776,7 +1767,7 @@ static int ntfs_index_rm_leaf(struct ntfs_index_context *icx)
 
 	ret = ntfs_ih_reparent_end(icx, parent_ih, ib);
 out:
-	ntfs_free(ib);
+	kvfree(ib);
 	return ret;
 }
 
@@ -1798,7 +1789,7 @@ static int ntfs_index_rm_node(struct ntfs_index_context *icx)
 			return -EINVAL;
 	}
 
-	ib = ntfs_malloc_nofs(icx->block_size);
+	ib = kvzalloc(icx->block_size, GFP_NOFS);
 	if (!ib)
 		return -ENOMEM;
 
@@ -1884,9 +1875,9 @@ descend:
 		ret = ntfs_ib_write(icx, ib);
 
 out2:
-	ntfs_free(ie);
+	kfree(ie);
 out:
-	ntfs_free(ib);
+	kvfree(ib);
 	return ret;
 }
 
@@ -1988,7 +1979,7 @@ struct index_entry *ntfs_index_walk_down(struct index_entry *ie, struct ntfs_ind
 		if (ictx->is_in_root) {
 			/* down from level zero */
 			ictx->ir = NULL;
-			ictx->ib = (struct index_block *)ntfs_malloc_nofs(ictx->block_size);
+			ictx->ib = kvzalloc(ictx->block_size, GFP_NOFS);
 			ictx->pindex = 1;
 			ictx->is_in_root = false;
 		} else {

@@ -27,7 +27,6 @@
 #include "ntfs.h"
 #include "aops.h"
 #include "iomap.h"
-#include "malloc.h"
 
 __le16 AT_UNNAMED[] = { cpu_to_le16('\0') };
 
@@ -767,7 +766,7 @@ static int ntfs_attr_find(const __le32 type, const __le16 *name,
 void ntfs_attr_name_free(unsigned char **name)
 {
 	if (*name) {
-		ntfs_free(*name);
+		kfree(*name);
 		*name = NULL;
 	}
 }
@@ -2011,7 +2010,7 @@ rl_err_out:
 				"Failed to release allocated cluster(s) in error code path.  Run chkdsk to recover the lost cluster(s).");
 			NVolSetErrors(vol);
 		}
-		ntfs_free(rl);
+		kvfree(rl);
 folio_err_out:
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
 		folio_unlock(folio);
@@ -2585,7 +2584,7 @@ int ntfs_attr_record_rm(struct ntfs_attr_search_ctx *ctx)
 	/* Post $ATTRIBUTE_LIST delete setup. */
 	if (type == AT_ATTRIBUTE_LIST) {
 		if (NInoAttrList(base_ni) && base_ni->attr_list)
-			ntfs_free(base_ni->attr_list);
+			kvfree(base_ni->attr_list);
 		base_ni->attr_list = NULL;
 		NInoClearAttrList(base_ni);
 	}
@@ -2631,7 +2630,7 @@ int ntfs_attr_record_rm(struct ntfs_attr_search_ctx *ctx)
 			}
 			if (ntfs_cluster_free_from_rl(base_ni->vol, al_rl))
 				ntfs_debug("Leaking clusters! Run chkdsk. Couldn't free clusters from attribute list runlist.\n");
-			ntfs_free(al_rl);
+			kvfree(al_rl);
 		}
 		/* Remove attribute record itself. */
 		if (ntfs_attr_record_rm(ctx)) {
@@ -3122,7 +3121,7 @@ out:
 put_err_out:
 	ntfs_attr_put_search_ctx(ctx);
 err_out:
-	ntfs_free(newname);
+	kfree(newname);
 	goto out;
 }
 
@@ -3136,10 +3135,10 @@ err_out:
 void ntfs_attr_close(struct ntfs_inode *ni)
 {
 	if (NInoNonResident(ni) && ni->runlist.rl)
-		ntfs_free(ni->runlist.rl);
+		kvfree(ni->runlist.rl);
 	/* Don't release if using an internal constant. */
 	if (ni->name != AT_UNNAMED && ni->name != I30)
-		ntfs_free(ni->name);
+		kfree(ni->name);
 }
 
 /**
@@ -4047,7 +4046,7 @@ static int ntfs_attr_make_resident(struct ntfs_inode *ni, struct ntfs_attr_searc
 	}
 
 	/* Throw away the now unused runlist. */
-	ntfs_free(ni->runlist.rl);
+	kvfree(ni->runlist.rl);
 	ni->runlist.rl = NULL;
 	ni->runlist.count = 0;
 	/* Update in-memory struct ntfs_attr. */
@@ -4153,7 +4152,7 @@ static int ntfs_non_resident_attr_shrink(struct ntfs_inode *ni, const s64 newsiz
 			 * Failed to truncate the runlist, so just throw it
 			 * away, it will be mapped afresh on next use.
 			 */
-			ntfs_free(ni->runlist.rl);
+			kvfree(ni->runlist.rl);
 			ni->runlist.rl = NULL;
 			ntfs_error(vol->sb, "Eeek! Run list truncation failed.\n");
 			return -EIO;
@@ -4340,7 +4339,7 @@ static int ntfs_non_resident_attr_expand(struct ntfs_inode *ni, const s64 newsiz
 				ni->runlist.rl = rl;
 				ni->runlist.count += more_entries;
 			} else {
-				rl = ntfs_malloc_nofs(sizeof(struct runlist_element) * 2);
+				rl = kmalloc(sizeof(struct runlist_element) * 2, GFP_NOFS);
 				if (!rl) {
 					err = -ENOMEM;
 					goto put_err_out;
@@ -4398,7 +4397,7 @@ static int ntfs_non_resident_attr_expand(struct ntfs_inode *ni, const s64 newsiz
 				/* Failed, free just allocated clusters. */
 				ntfs_error(sb, "Run list merge failed");
 				ntfs_cluster_free_from_rl(vol, rl);
-				ntfs_free(rl);
+				kvfree(rl);
 				return -EIO;
 			}
 			ni->runlist.rl = rln;
@@ -4461,7 +4460,7 @@ rollback:
 		 * Failed to truncate the runlist, so just throw it away, it
 		 * will be mapped afresh on next use.
 		 */
-		ntfs_free(ni->runlist.rl);
+		kvfree(ni->runlist.rl);
 		ni->runlist.rl = NULL;
 		ntfs_error(sb, "Couldn't truncate runlist. Rollback failed");
 	} else {
@@ -4985,7 +4984,7 @@ int ntfs_attr_map_cluster(struct ntfs_inode *ni, s64 vcn_start, s64 *lcn_start,
 		err = PTR_ERR(rl);
 		if (ntfs_cluster_free_from_rl(vol, rlc))
 			ntfs_error(vol->sb, "Failed to free hot clusters.");
-		ntfs_free(rlc);
+		kvfree(rlc);
 		goto out;
 	}
 	ni->runlist.rl = rl;
@@ -5182,17 +5181,15 @@ void *ntfs_attr_readall(struct ntfs_inode *ni, const __le32 type,
 	}
 	bmp_ni = NTFS_I(bmp_vi);
 
-	data = ntfs_malloc_nofs(bmp_ni->data_size);
-	if (!data) {
-		ntfs_error(sb, "ntfs_malloc_nofs failed");
+	data = kvmalloc(bmp_ni->data_size, GFP_NOFS);
+	if (!data)
 		goto out;
-	}
 
 	size = ntfs_inode_attr_pread(VFS_I(bmp_ni), 0, bmp_ni->data_size,
 			(u8 *)data);
 	if (size != bmp_ni->data_size) {
 		ntfs_error(sb, "ntfs_attr_pread failed");
-		ntfs_free(data);
+		kvfree(data);
 		goto out;
 	}
 	ret = data;
@@ -5218,7 +5215,7 @@ int ntfs_non_resident_attr_insert_range(struct ntfs_inode *ni, s64 start_vcn, s6
 	if (start_vcn > NTFS_B_TO_CLU(vol, ni->allocated_size))
 		return -EINVAL;
 
-	hole_rl = ntfs_malloc_nofs(sizeof(*hole_rl) * 2);
+	hole_rl = kmalloc(sizeof(*hole_rl) * 2, GFP_NOFS);
 	if (!hole_rl)
 		return -ENOMEM;
 	hole_rl[0].vcn = start_vcn;
@@ -5238,7 +5235,7 @@ int ntfs_non_resident_attr_insert_range(struct ntfs_inode *ni, s64 start_vcn, s6
 	rl = ntfs_rl_find_vcn_nolock(ni->runlist.rl, start_vcn);
 	if (!rl) {
 		up_write(&ni->runlist.lock);
-		ntfs_free(hole_rl);
+		kfree(hole_rl);
 		return -EIO;
 	}
 
@@ -5246,7 +5243,7 @@ int ntfs_non_resident_attr_insert_range(struct ntfs_inode *ni, s64 start_vcn, s6
 				  hole_rl, 1, &new_rl_count);
 	if (IS_ERR(rl)) {
 		up_write(&ni->runlist.lock);
-		ntfs_free(hole_rl);
+		kfree(hole_rl);
 		return PTR_ERR(rl);
 	}
 	ni->runlist.rl =  rl;
@@ -5371,7 +5368,7 @@ out_ctx:
 	if (ctx)
 		ntfs_attr_put_search_ctx(ctx);
 out_rl:
-	ntfs_free(punch_rl);
+	kvfree(punch_rl);
 	mark_mft_record_dirty(ni);
 	return ret;
 }
@@ -5420,7 +5417,7 @@ int ntfs_non_resident_attr_punch_hole(struct ntfs_inode *ni, s64 start_vcn, s64 
 	ret = ntfs_attr_update_mapping_pairs(ni, 0);
 	up_write(&ni->runlist.lock);
 	if (ret) {
-		ntfs_free(punch_rl);
+		kvfree(punch_rl);
 		return ret;
 	}
 
@@ -5428,7 +5425,7 @@ int ntfs_non_resident_attr_punch_hole(struct ntfs_inode *ni, s64 start_vcn, s64 
 	if (ret)
 		ntfs_error(vol->sb, "Freeing of clusters failed");
 
-	ntfs_free(punch_rl);
+	kvfree(punch_rl);
 	mark_mft_record_dirty(ni);
 	return ret;
 }

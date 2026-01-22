@@ -18,7 +18,6 @@
 #include "index.h"
 #include "lcnalloc.h"
 #include "reparse.h"
-#include "malloc.h"
 
 struct WSL_LINK_REPARSE_DATA {
 	__le32	type;
@@ -126,7 +125,7 @@ unsigned int ntfs_make_symlink(struct ntfs_inode *ni)
 			if (wsl_link_data->type == cpu_to_le32(2)) {
 				lth = le16_to_cpu(reparse_attr->reparse_data_length) -
 						  sizeof(wsl_link_data->type);
-				ni->target = ntfs_malloc_nofs(lth + 1);
+				ni->target = kvzalloc(lth + 1, GFP_NOFS);
 				if (ni->target) {
 					memcpy(ni->target, wsl_link_data->link, lth);
 					ni->target[lth] = 0;
@@ -141,7 +140,7 @@ unsigned int ntfs_make_symlink(struct ntfs_inode *ni)
 		ni->flags &= ~FILE_ATTR_REPARSE_POINT;
 
 	if (reparse_attr)
-		ntfs_free(reparse_attr);
+		kvfree(reparse_attr);
 
 	return mode;
 }
@@ -181,7 +180,7 @@ unsigned int ntfs_reparse_tag_dt_types(struct ntfs_volume *vol, unsigned long mr
 	}
 
 	if (reparse_attr)
-		ntfs_free(reparse_attr);
+		kvfree(reparse_attr);
 
 	iput(vi);
 	return dt_type;
@@ -487,10 +486,10 @@ int ntfs_reparse_set_wsl_symlink(struct ntfs_inode *ni,
 		return -EINVAL;
 
 	reparse_len = sizeof(struct reparse_point) + sizeof(data->type) + len;
-	reparse = (struct reparse_point *)ntfs_malloc_nofs(reparse_len);
+	reparse = (struct reparse_point *)kvzalloc(reparse_len, GFP_NOFS);
 	if (!reparse) {
 		err = -ENOMEM;
-		ntfs_free(utarget);
+		kvfree(utarget);
 	} else {
 		data = (struct WSL_LINK_REPARSE_DATA *)reparse->reparse_data;
 		reparse->reparse_tag = IO_REPARSE_TAG_LX_SYMLINK;
@@ -501,7 +500,7 @@ int ntfs_reparse_set_wsl_symlink(struct ntfs_inode *ni,
 		memcpy(data->link, utarget, len);
 		err = ntfs_set_ntfs_reparse_data(ni,
 				(char *)reparse, reparse_len);
-		ntfs_free(reparse);
+		kvfree(reparse);
 		if (!err)
 			ni->target = utarget;
 	}
@@ -533,7 +532,7 @@ int ntfs_reparse_set_wsl_not_symlink(struct ntfs_inode *ni, mode_t mode)
 		return -EOPNOTSUPP;
 
 	reparse_len = sizeof(struct reparse_point) + len;
-	reparse = (struct reparse_point *)ntfs_malloc_nofs(reparse_len);
+	reparse = (struct reparse_point *)kvzalloc(reparse_len, GFP_NOFS);
 	if (!reparse)
 		err = -ENOMEM;
 	else {
@@ -542,7 +541,7 @@ int ntfs_reparse_set_wsl_not_symlink(struct ntfs_inode *ni, mode_t mode)
 		reparse->reserved = cpu_to_le16(0);
 		err = ntfs_set_ntfs_reparse_data(ni, (char *)reparse,
 						 reparse_len);
-		ntfs_free(reparse);
+		kvfree(reparse);
 	}
 
 	return err;
