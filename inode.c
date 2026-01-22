@@ -1913,7 +1913,7 @@ int ntfs_read_inode_mount(struct inode *vi)
 	s64 next_vcn, last_vcn, highest_vcn;
 	struct super_block *sb = vi->i_sb;
 	struct ntfs_volume *vol = NTFS_SB(sb);
-	struct ntfs_inode *ni;
+	struct ntfs_inode *ni = NTFS_I(vi);
 	struct mft_record *m = NULL;
 	struct attr_record *a;
 	struct ntfs_attr_search_ctx *ctx;
@@ -1926,7 +1926,6 @@ int ntfs_read_inode_mount(struct inode *vi)
 	/* Initialize the ntfs specific part of @vi. */
 	ntfs_init_big_inode(vi);
 
-	ni = NTFS_I(vi);
 
 	/* Setup the data attribute. It is special as it is mst protected. */
 	NInoSetNonResident(ni);
@@ -1995,7 +1994,10 @@ int ntfs_read_inode_mount(struct inode *vi)
 	vi->i_generation = ni->seq_no = le16_to_cpu(m->sequence_number);
 
 	/* Provides read_folio() for map_mft_record(). */
-	vi->i_mapping->a_ops = &ntfs_aops;
+	if (vi->i_ino == FILE_MFT)
+		vi->i_mapping->a_ops = &ntfs_mft_aops;
+	else
+		vi->i_mapping->a_ops = &ntfs_aops;
 
 	ctx = ntfs_attr_get_search_ctx(ni, m);
 	if (!ctx) {

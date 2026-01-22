@@ -809,6 +809,27 @@ static int ntfs_mft_writepage(struct page *page, struct writeback_control *wbc,
 	return ret;
 }
 
+static int ntfs_mft_writepages(struct address_space *mapping,
+			       struct writeback_control *wbc)
+{
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 10, 0)
+	struct folio *folio = NULL;
+	int error;
+#endif
+
+	if (NVolShutdown(NTFS_I(mapping->host)->vol))
+		return -EIO;
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 10, 0)
+	while ((folio = writeback_iter(mapping, wbc, folio, &error)))
+		error = ntfs_mft_writepage(folio, wbc);
+	return error;
+#else
+	return write_cache_pages(mapping, wbc,
+				 ntfs_mft_writepage, mapping);
+#endif
+}
+
 static int ntfs_writepages(struct address_space *mapping,
 		struct writeback_control *wbc)
 {
@@ -909,6 +930,51 @@ const struct address_space_operations ntfs_aops = {
 	.invalidatepage		= iomap_invalidatepage,
 #endif
 	.swap_activate          = ntfs_swap_activate,
+};
+
+const struct address_space_operations ntfs_mft_aops = {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 19, 0)
+	.read_folio		= ntfs_read_folio,
+#else
+	.readpage		= ntfs_readpage,
+#endif
+	.readahead		= ntfs_readahead,
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 0, 0)
+	.writepage		= ntfs_writepage,
+#endif
+	.writepages		= ntfs_mft_writepages,
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
+	.dirty_folio		= iomap_dirty_folio,
+#else
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
+	.dirty_folio		= filemap_dirty_folio,
+#else
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 18, 0)
+	.dirty_folio		= iomap_dirty_folio,
+#else
+	.set_page_dirty		= __set_page_dirty_nobuffers,
+#endif
+#endif
+#endif
+	.bmap			= ntfs_bmap,
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0)
+	.migrate_folio		= filemap_migrate_folio,
+#else
+	.migratepage		= iomap_migrate_page,
+#endif
+	.is_partially_uptodate	= iomap_is_partially_uptodate,
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 8, 0)
+	.error_remove_folio	= generic_error_remove_folio,
+#else
+	.error_remove_page	= generic_error_remove_page,
+#endif
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
+	.release_folio		= iomap_release_folio,
+	.invalidate_folio	= iomap_invalidate_folio,
+#else
+	.releasepage		= iomap_releasepage,
+	.invalidatepage		= iomap_invalidatepage,
+#endif
 };
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
