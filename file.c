@@ -949,9 +949,6 @@ static long ntfs_fallocate(struct file *file, int mode, loff_t offset, loff_t le
 	s64 start_vcn, end_vcn;
 	bool map_locked = false;
 
-	if (!S_ISREG(vi->i_mode))
-		return -EOPNOTSUPP;
-
 	if (mode & ~(FALLOC_FL_KEEP_SIZE | FALLOC_FL_INSERT_RANGE |
 		     FALLOC_FL_PUNCH_HOLE | FALLOC_FL_COLLAPSE_RANGE))
 		return -EOPNOTSUPP;
