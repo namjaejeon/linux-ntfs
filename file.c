@@ -616,28 +616,6 @@ static ssize_t ntfs_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
 
 	old_data_size = ni->data_size;
 	old_init_size = ni->initialized_size;
-	if (iocb->ki_pos + ret > old_data_size) {
-		mutex_lock(&ni->mrec_lock);
-		if (!NInoCompressed(ni) && iocb->ki_pos + ret > ni->allocated_size &&
-		    iocb->ki_pos + ret < ni->allocated_size + vol->preallocated_size)
-			ret = ntfs_attr_expand(ni, iocb->ki_pos + ret,
-					ni->allocated_size + vol->preallocated_size);
-		else if (NInoCompressed(ni) && iocb->ki_pos + ret > ni->allocated_size)
-			ret = ntfs_attr_expand(ni, iocb->ki_pos + ret,
-				round_up(iocb->ki_pos + ret, ni->itype.compressed.block_size));
-		else
-			ret = ntfs_attr_expand(ni, iocb->ki_pos + ret, 0);
-		mutex_unlock(&ni->mrec_lock);
-		if (ret < 0)
-			goto out;
-	}
-
-	if (NInoNonResident(ni) && iocb->ki_pos + count > old_init_size) {
-		ret = ntfs_extend_initialized_size(vi, iocb->ki_pos,
-				iocb->ki_pos + count);
-		if (ret < 0)
-			goto out;
-	}
 
 	if (NInoNonResident(ni) && NInoCompressed(ni)) {
 		ret = ntfs_compress_write(ni, pos, count, from);
@@ -713,7 +691,6 @@ static ssize_t ntfs_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
 		if (ret > 0)
 			iocb->ki_pos += ret;
 #endif
-
 	}
 out:
 	if (ret < 0 && ret != -EIOCBQUEUED) {
