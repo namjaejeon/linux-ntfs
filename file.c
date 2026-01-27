@@ -783,7 +783,7 @@ static int ntfs_file_mmap(struct file *file, struct vm_area_struct *vma)
 #endif
 
 		if (NTFS_I(inode)->initialized_size < to) {
-			err = ntfs_extend_initialized_size(inode, to, to);
+			err = ntfs_extend_initialized_size(inode, to, to, false);
 			if (err)
 				return err;
 		}

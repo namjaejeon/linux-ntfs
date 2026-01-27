@@ -930,7 +930,7 @@ err_out:
 /* Constant for the multiplicative hash function.  */
 #define HASH_MULTIPLIER		0x1E35A7BD
 
-struct COMPRESS_CONTEXT {
+struct compress_context {
 	const unsigned char *inbuf;
 	int bufsize;
 	int size;
@@ -988,7 +988,7 @@ static inline unsigned int ntfs_hash(const u8 *p)
  *          position, it ends early and returns the longest match found so far.
  *          This saves a lot of time on degenerate inputs.
  */
-static void ntfs_best_match(struct COMPRESS_CONTEXT *pctx, const int i,
+static void ntfs_best_match(struct compress_context *pctx, const int i,
 		int best_len)
 {
 	const u8 * const inbuf = pctx->inbuf;
@@ -1091,7 +1091,7 @@ out:
 /*
  * Advance the match-finder, but don't search for matches.
  */
-static void ntfs_skip_position(struct COMPRESS_CONTEXT *pctx, const int i)
+static void ntfs_skip_position(struct compress_context *pctx, const int i)
 {
 	unsigned int hash;
 
@@ -1121,7 +1121,7 @@ static void ntfs_skip_position(struct COMPRESS_CONTEXT *pctx, const int i)
 static unsigned int ntfs_compress_block(const char *inbuf, const int bufsize,
 		char *outbuf)
 {
-	struct COMPRESS_CONTEXT *pctx;
+	struct compress_context *pctx;
 	int i; /* current position */
 	int j; /* end of best match from current position */
 	int k; /* end of best match from next position */
@@ -1136,7 +1136,7 @@ static unsigned int ntfs_compress_block(const char *inbuf, const int bufsize,
 	int tag;    /* current value of tag */
 	int ntag;   /* count of bits still undefined in tag */
 
-	pctx = kvzalloc(sizeof(struct COMPRESS_CONTEXT), GFP_NOFS);
+	pctx = kvzalloc(sizeof(struct compress_context), GFP_NOFS);
 	if (!pctx)
 		return -ENOMEM;
 

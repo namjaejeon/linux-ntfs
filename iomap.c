@@ -906,7 +906,9 @@ static int __ntfs_write_iomap_begin(struct inode *inode, loff_t offset,
 	if (NInoNonResident(ni)) {
 		if (ntfs_iomap_flags & (NTFS_IOMAP_FLAGS_BEGIN | NTFS_IOMAP_FLAGS_DIO) &&
 		    end > ni->initialized_size) {
-			ret = ntfs_extend_initialized_size(inode, offset, end);
+			ret = ntfs_extend_initialized_size(inode, offset, end,
+							   ntfs_iomap_flags &
+							   NTFS_IOMAP_FLAGS_DIO);
 			if (ret < 0)
 				return ret;
 		}
