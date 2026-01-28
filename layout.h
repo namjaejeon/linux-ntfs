@@ -1836,6 +1836,17 @@ enum {
 } __packed;
 
 /*
+ * struct index_header - Common header for index root and index blocks
+ *
+ * entries_offset:     Byte offset to first INDEX_ENTRY (8-byte aligned).
+ * index_length:       Bytes used by index entries (8-byte aligned).
+ *                     From entries_offset to end of used data.
+ * allocated_size:     Total allocated bytes for this index block.
+ *                     Fixed size in index allocation; dynamic in root.
+ * flags:              Index flags (SMALL_INDEX, LARGE_INDEX, LEAF_NODE, etc.).
+ *                     See INDEX_HEADER_FLAGS enum.
+ * reserved:           3 bytes reserved/padding (zero, 8-byte aligned).
+ *
  * This is the header for indexes, describing the INDEX_ENTRY records, which
  * follow the index_header. Together the index header and the index entries
  * make up a complete index.
@@ -1843,36 +1854,39 @@ enum {
  * IMPORTANT NOTE: The offset, length and size structure members are counted
  * relative to the start of the index header structure and not relative to the
  * start of the index root or index allocation structures themselves.
+ *
+ * For the index root attribute, the above two numbers are always
+ * equal, as the attribute is resident and it is resized as needed. In
+ * the case of the index allocation attribute the attribute is not
+ * resident and hence the allocated_size is a fixed value and must
+ * equal the index_block_size specified by the INDEX_ROOT attribute
+ * corresponding to the INDEX_ALLOCATION attribute this INDEX_BLOCK
+ * belongs to.
  */
 struct index_header {
-	__le32 entries_offset;		/*
-					 * Byte offset to first INDEX_ENTRY
-					 * aligned to 8-byte boundary.
-					 */
-	__le32 index_length;		/*
-					 * Data size of the index in bytes,
-					 * i.e. bytes used from allocated
-					 * size, aligned to 8-byte boundary.
-					 */
-	__le32 allocated_size;		/*
-					 * Byte size of this index (block),
-					 * multiple of 8 bytes.
-					 */
-	/*
-	 * NOTE: For the index root attribute, the above two numbers are always
-	 * equal, as the attribute is resident and it is resized as needed. In
-	 * the case of the index allocation attribute the attribute is not
-	 * resident and hence the allocated_size is a fixed value and must
-	 * equal the index_block_size specified by the INDEX_ROOT attribute
-	 * corresponding to the INDEX_ALLOCATION attribute this INDEX_BLOCK
-	 * belongs to.
-	 */
-	u8 flags;			/* Bit field of INDEX_HEADER_FLAGS. */
-	u8 reserved[3];			/* Reserved/align to 8-byte boundary. */
+	__le32 entries_offset;
+	__le32 index_length;
+	__le32 allocated_size;
+	u8 flags;
+	u8 reserved[3];
 } __packed;
 
 /*
- * Attribute: Index root (0x90).
+ * struct index_root - $INDEX_ROOT attribute (0x90).
+ *
+ * @type:               Indexed attribute type ($FILE_NAME for dirs,
+ *                      0 for view indexes).
+ * @collation_rule:     Collation rule for sorting entries
+ *                      (COLLATION_FILE_NAME for $FILE_NAME).
+ * @index_block_size:   Size of each index block in bytes
+ *                      (in $INDEX_ALLOCATION).
+ * @clusters_per_index_block:
+ *                      Clusters per index block (or log2(bytes)
+ *                      if < cluster).
+ *                      Power of 2; used for encoding block size.
+ * @reserved:           3 bytes reserved/alignment (zero).
+ * @index:              Index header for root entries (entries follow
+ *                      immediately).
  *
  * NOTE: Always resident.
  *
@@ -1891,37 +1905,33 @@ struct index_header {
  * directories do not contain entries for themselves, though.
  */
 struct index_root {
-	__le32 type;			/*
-					 * Type of the indexed attribute. Is
-					 * $FILE_NAME for directories, zero
-					 * for view indexes. No other values
-					 * allowed.
-					 */
-	__le32 collation_rule;		/*
-					 * Collation rule used to sort the index
-					 * entries. If type is $FILE_NAME, this
-					 * must be COLLATION_FILE_NAME.
-					 */
-	__le32 index_block_size;	/*
-					 * Size of each index block in bytes (in
-					 * the index allocation attribute).
-					 */
-	u8 clusters_per_index_block;	/*
-					 * Cluster size of each index block (in
-					 * the index allocation attribute), when
-					 * an index block is >= than a cluster,
-					 * otherwise this will be the log of
-					 * the size (like how the encoding of
-					 * the mft record size and the index
-					 * record size found in the boot sector
-					 * work). Has to be a power of 2.
-					 */
-	u8 reserved[3];			/* Reserved/align to 8-byte boundary. */
-	struct index_header index;	/* Index header describing the following index entries. */
+	__le32 type;
+	__le32 collation_rule;
+	__le32 index_block_size;
+	u8 clusters_per_index_block;
+	u8 reserved[3];
+	struct index_header index;
 } __packed;
 
 /*
- * Attribute: Index allocation (0xa0).
+ * struct index_block - Index allocation (0xa0).
+ *
+ * @magic:              Magic value "INDX" (see magic_INDX).
+ * @usa_ofs:            Offset to Update Sequence Array (see ntfs_record).
+ * @usa_count:          Number of USA entries (see ntfs_record).
+ * @lsn:                Log sequence number of last modification.
+ * @index_block_vcn:    VCN of this index block.
+ *                      Units: clusters if cluster_size <= index_block_size;
+ *                      sectors otherwise.
+ * @index:              Index header describing entries in this block.
+ *
+ * When creating the index block, we place the update sequence array at this
+ * offset, i.e. before we start with the index entries. This also makes sense,
+ * otherwise we could run into problems with the update sequence array
+ * containing in itself the last two bytes of a sector which would mean that
+ * multi sector transfer protection wouldn't work. As you can't protect data
+ * by overwriting it since you then can't get it back...
+ * When reading use the data from the ntfs record header.
  *
  * NOTE: Always non-resident (doesn't make sense to be resident anyway!).
  *
@@ -1930,36 +1940,23 @@ struct index_root {
  * index entries (INDEX_ENTRY structures), as described by the struct index_header.
  */
 struct index_block {
-	__le32 magic;		/* Magic is "INDX". */
-	__le16 usa_ofs;		/* See ntfs_record struct definition. */
-	__le16 usa_count;	/* See ntfs_record struct  definition. */
-
-	__le64 lsn;		/*
-				 * LogFile sequence number of the last
-				 * modification of this index block.
-				 */
-	__le64 index_block_vcn;	/*
-				 * Virtual cluster number of the index block.
-				 * If the cluster_size on the volume is <= the
-				 * index_block_size of the directory,
-				 * index_block_vcn counts in units of clusters,
-				 * and in units of sectors otherwise.
-				 */
-	struct index_header index;	/* Describes the following index entries. */
-/*
- * When creating the index block, we place the update sequence array at this
- * offset, i.e. before we start with the index entries. This also makes sense,
- * otherwise we could run into problems with the update sequence array
- * containing in itself the last two bytes of a sector which would mean that
- * multi sector transfer protection wouldn't work. As you can't protect data
- * by overwriting it since you then can't get it back...
- * When reading use the data from the ntfs record header.
- */
+	__le32 magic;
+	__le16 usa_ofs;
+	__le16 usa_count;
+	__le64 lsn;
+	__le64 index_block_vcn;
+	struct index_header index;
 } __packed;
 
 static_assert(sizeof(struct index_block) == 40);
 
 /*
+ * struct reparse_index_key - Key for $R reparse index in $Extend/$Reparse
+ *
+ * @reparse_tag:    Reparse point type (including flags, REPARSE_TAG_*).
+ * @file_id:        MFT record number of the file with $REPARSE_POINT
+ *                  attribute.
+ *
  * The system file FILE_Extend/$Reparse contains an index named $R listing
  * all reparse points on the volume. The index entry keys are as defined
  * below. Note, that there is no index data associated with the index entries.
@@ -1968,17 +1965,32 @@ static_assert(sizeof(struct index_block) == 40);
  * COLLATION_NTOFS_ULONGS.
  */
 struct reparse_index_key {
-	__le32 reparse_tag;	/* Reparse point type (inc. flags). */
-	__le64 file_id;		/*
-				 * Mft record of the file containing
-				 * the reparse point attribute.
-				 */
+	__le32 reparse_tag;
+	__le64 file_id;
 } __packed;
 
 /*
- * Quota flags (32-bit).
+ * enum - Quota entry flags (32-bit) in $Quota/$Q
  *
- * The user quota flags.  Names explain meaning.
+ * These flags are stored in quota control entries ($Quota file).
+ * They control quota tracking, limits, and state.
+ *
+ * User quota flags (mask 0x00000007):
+ * @QUOTA_FLAG_DEFAULT_LIMITS:   Use default limits.
+ * @QUOTA_FLAG_LIMIT_REACHED:    Quota limit reached.
+ * @QUOTA_FLAG_ID_DELETED:       Quota ID deleted.
+ * @QUOTA_FLAG_USER_MASK:        Mask for user quota flags (0x00000007).
+ *
+ * Default entry flags (owner_id = QUOTA_DEFAULTS_ID):
+ * @QUOTA_FLAG_TRACKING_ENABLED:    Quota tracking enabled.
+ * @QUOTA_FLAG_ENFORCEMENT_ENABLED: Quota enforcement enabled.
+ * @QUOTA_FLAG_TRACKING_REQUESTED:  Tracking requested (pending).
+ * @QUOTA_FLAG_LOG_THRESHOLD:       Log when threshold reached.
+ * @QUOTA_FLAG_LOG_LIMIT:           Log when limit reached.
+ * @QUOTA_FLAG_OUT_OF_DATE:         Quota data out of date.
+ * @QUOTA_FLAG_CORRUPT:             Quota entry corrupt.
+ * @QUOTA_FLAG_PENDING_DELETES:     Pending quota deletes.
+ *
  */
 enum {
 	QUOTA_FLAG_DEFAULT_LIMITS	= cpu_to_le32(0x00000001),
@@ -1986,12 +1998,6 @@ enum {
 	QUOTA_FLAG_ID_DELETED		= cpu_to_le32(0x00000004),
 
 	QUOTA_FLAG_USER_MASK		= cpu_to_le32(0x00000007),
-	/* This is a bit mask for the user quota flags. */
-
-	/*
-	 * These flags are only present in the quota defaults index entry, i.e.
-	 * in the entry where owner_id = QUOTA_DEFAULTS_ID.
-	 */
 	QUOTA_FLAG_TRACKING_ENABLED	= cpu_to_le32(0x00000010),
 	QUOTA_FLAG_ENFORCEMENT_ENABLED	= cpu_to_le32(0x00000020),
 	QUOTA_FLAG_TRACKING_REQUESTED	= cpu_to_le32(0x00000040),
@@ -2004,6 +2010,17 @@ enum {
 };
 
 /*
+ * struct quota_control_entry - Quota entry in $Quota/$Q
+ *
+ * @version:        Currently 2.
+ * @flags:          Quota flags (QUOTA_FLAG_* bits).
+ * @bytes_used:     Current quota usage in bytes.
+ * @change_time:    Last modification time (NTFS timestamp).
+ * @threshold:      Soft quota limit (-1 = unlimited).
+ * @limit:          Hard quota limit (-1 = unlimited).
+ * @exceeded_time:  Time soft quota has been exceeded.
+ * @sid:            SID of user/object (zero for defaults entry).
+ *
  * The system file FILE_Extend/$Quota contains two indexes $O and $Q. Quotas
  * are on a per volume and per user basis.
  *
@@ -2025,19 +2042,14 @@ enum {
  * The $Q index entry data is the quota control entry and is defined below.
  */
 struct quota_control_entry {
-	__le32 version;		/* Currently equals 2. */
-	__le32 flags;		/* Flags describing this quota entry. */
-	__le64 bytes_used;	/* How many bytes of the quota are in use. */
-	__le64 change_time;	/* Last time this quota entry was changed. */
-	__le64 threshold;	/* Soft quota (-1 if not limited). */
-	__le64 limit;		/* Hard quota (-1 if not limited). */
-	__le64 exceeded_time;	/* How long the soft quota has been exceeded. */
-	struct ntfs_sid sid;	/*
-				 * The SID of the user/object associated with
-				 * this quota entry.  Equals zero for the quota
-				 * defaults entry (and in fact on a WinXP
-				 * volume, it is not present at all).
-				 */
+	__le32 version;
+	__le32 flags;
+	__le64 bytes_used;
+	__le64 change_time;
+	__le64 threshold;
+	__le64 limit;
+	__le64 exceeded_time;
+	struct ntfs_sid sid;
 } __packed;
 
 /*
@@ -2058,134 +2070,142 @@ enum {
 };
 
 /*
- * Index entry flags (16-bit).
+ * enum - Index entry flags (16-bit)
+ *
+ * These flags are in INDEX_ENTRY.flags (after key data).
+ * They describe entry type and status in index blocks/root.
+ *
+ * @INDEX_ENTRY_NODE:     Entry points to a sub-node (index block VCN).
+ *                        (Not a leaf entry; internal node reference.)
+ *                        i.e. a reference to an index block in form of
+ *                        a virtual cluster number
+ * @INDEX_ENTRY_END:      Last entry in index block/root.
+ *                        Does not represent a real file; can point to sub-node.
+ * @INDEX_ENTRY_SPACE_FILLER:
+ *                        Dummy value to force enum to 16-bit width.
  */
 enum {
-	INDEX_ENTRY_NODE = cpu_to_le16(1), /*
-					    * This entry contains a sub-node,
-					    * i.e. a reference to an index block
-					    * in form of a virtual cluster number
-					    * (see below).
-					    */
-	INDEX_ENTRY_END  = cpu_to_le16(2), /*
-					    * This signifies the last entry in an
-					    * index block.  The index entry does not
-					    * represent a file but it can point
-					    * to a sub-node.
-					    */
-
-	INDEX_ENTRY_SPACE_FILLER = cpu_to_le16(0xffff), /* gcc: Force enum bit width to 16-bit. */
+	INDEX_ENTRY_NODE = cpu_to_le16(1),
+	INDEX_ENTRY_END  = cpu_to_le16(2),
+	INDEX_ENTRY_SPACE_FILLER = cpu_to_le16(0xffff),
 } __packed;
 
 /*
- * This the index entry header (see below).
+ * struct index_entry_header - Common header for all NTFS index entries
+ *
+ * This is the fixed header at the start of every INDEX_ENTRY in index
+ * blocks or index root. It is followed by the variable key, data, and
+ * sub-node VCN.
+ *
+ * Union @data:
+ * - When INDEX_ENTRY_END is not set:
+ *   @data.dir.indexed_file: MFT reference of the file described by
+ *                           this entry. Used in directory indexes ($I30).
+ * - When INDEX_ENTRY_END is set or for view indexes:
+ *   @data.vi.data_offset: Byte offset from end of this header to
+ *                         entry data.
+ *   @data.vi.data_length: Length of data in bytes.
+ *   @data.vi.reservedV:   Reserved (zero).
+ *
+ * @length:         Total byte size of this index entry
+ *                  (multiple of 8 bytes).
+ * @key_length:     Byte size of the key (not multiple of 8 bytes).
+ *                  Key follows the header immediately.
+ * @flags:          Bit field of INDEX_ENTRY_* flags (INDEX_ENTRY_NODE, etc.).
+ * @reserved:       Reserved/padding (zero; align to 8 bytes).
  */
 struct index_entry_header {
-/*  0*/	union {
-		struct { /* Only valid when INDEX_ENTRY_END is not set. */
-			__le64 indexed_file;	/*
-						 * The mft reference of the file
-						 * described by this index entry.
-						 * Used for directory indexes.
-						 */
+	union {
+		struct {
+			__le64 indexed_file;
 		} __packed dir;
 		struct {
-			/* Used for views/indexes to find the entry's data. */
-			__le16 data_offset;	/*
-						 * Data byte offset from this
-						 * INDEX_ENTRY. Follows the index key.
-						 */
-			__le16 data_length;	/* Data length in bytes. */
-			__le32 reservedV;		/* Reserved (zero). */
+			__le16 data_offset;
+			__le16 data_length;
+			__le32 reservedV;
 		} __packed vi;
 	} __packed data;
-	__le16 length;		/* Byte size of this index entry, multiple of 8-bytes. */
-	__le16 key_length;	/*
-				 * Byte size of the key value, which is in the index entry.
-				 * It follows field reserved. Not multiple of 8-bytes.
-				 */
-	__le16 flags; /* Bit field of INDEX_ENTRY_* flags. */
-	__le16 reserved;		 /* Reserved/align to 8-byte boundary. */
+	__le16 length;
+	__le16 key_length;
+	__le16 flags;
+	__le16 reserved;
 } __packed;
 
 static_assert(sizeof(struct index_entry_header) == 16);
 
 /*
+ * struct index_entry - NTFS index entry structure
+ *
  * This is an index entry. A sequence of such entries follows each index_header
  * structure. Together they make up a complete index. The index follows either
  * an index root attribute or an index allocation attribute.
+ *
+ * Union @data (valid when INDEX_ENTRY_END not set):
+ * @data.dir.indexed_file: MFT ref of file (for directory indexes).
+ * @data.vi.data_offset:   Offset to data after key.
+ * @data.vi.data_length:   Length of data in bytes.
+ * @data.vi.reservedV:     Reserved (zero).
+ *
+ * Fields:
+ * @length:         Total byte size of entry (multiple of 8 bytes).
+ * @key_length:     Byte size of key (not multiple of 8).
+ * @flags:          INDEX_ENTRY_* flags (NODE, END, etc.).
+ * @reserved:       Reserved/padding (zero).
+ *
+ * Union @key (valid when INDEX_ENTRY_END not set)
+ * The key of the indexed attribute. NOTE: Only present
+ * if INDEX_ENTRY_END bit in flags is not set. NOTE: On
+ * NTFS versions before 3.0 the only valid key is the
+ * struct file_name_attr. On NTFS 3.0+ the following
+ * additional index keys are defined:
+ * @key.file_name:  $FILE_NAME attr (for $I30 directory indexes).
+ * @key.sii:        $SII key (for $Secure $SII index).
+ * @key.sdh:        $SDH key (for $Secure $SDH index).
+ * @key.object_id:  GUID (for $ObjId $O index).
+ * @key.reparse:    Reparse tag + file ID (for $Reparse $R).
+ * @key.sid:        SID (for $Quota $O index).
+ * @key.owner_id:   User ID (for $Quota $Q index).
+ *
+ * The (optional) index data is inserted here when creating.
+ * __le64 vcn;     If INDEX_ENTRY_NODE bit in flags is set, the last
+ *                 eight bytes of this index entry contain the virtual
+ *                 cluster number of the index block that holds the
+ *                 entries immediately preceding the current entry (the
+ *                 vcn references the corresponding cluster in the data
+ *                 of the non-resident index allocation attribute). If
+ *                 the key_length is zero, then the vcn immediately
+ *                 follows the INDEX_ENTRY_HEADER. Regardless of
+ *                 key_length, the address of the 8-byte boundary
+ *                 aligned vcn of INDEX_ENTRY{_HEADER} *ie is given by
+ *                 (char*)ie + le16_to_cpu(ie*)->length) - sizeof(VCN),
+ *                 where sizeof(VCN) can be hardcoded as 8 if wanted.
  *
  * NOTE: Before NTFS 3.0 only filename attributes were indexed.
  */
 struct index_entry {
 	union {
-		struct { /* Only valid when INDEX_ENTRY_END is not set. */
-			__le64 indexed_file;	/*
-						 * The mft reference of the file
-						 * described by this index entry.
-						 * Used for directory indexes.
-						 */
+		struct {
+			__le64 indexed_file;
 		} __packed dir;
-		struct { /* Used for views/indexes to find the entry's data. */
-			__le16 data_offset;	/*
-						 * Data byte offset from this INDEX_ENTRY.
-						 * Follows the index key.
-						 */
-			__le16 data_length;	/* Data length in bytes. */
-			__le32 reservedV;		/* Reserved (zero). */
+		struct {
+			__le16 data_offset;
+			__le16 data_length;
+			__le32 reservedV;
 		} __packed vi;
 	} __packed data;
-	__le16 length;		 /* Byte size of this index entry, multiple of 8-bytes. */
-	__le16 key_length;	 /*
-				  * Byte size of the key value, which is in the index entry.
-				  * It follows field reserved. Not multiple of 8-bytes.
-				  */
-	__le16 flags;		/* Bit field of INDEX_ENTRY_* flags. */
-	__le16 reserved;		 /* Reserved/align to 8-byte boundary. */
-
+	__le16 length;
+	__le16 key_length;
+	__le16 flags;
+	__le16 reserved;
 	union {
-		/*
-		 * The key of the indexed attribute. NOTE: Only present
-		 * if INDEX_ENTRY_END bit in flags is not set. NOTE: On
-		 * NTFS versions before 3.0 the only valid key is the
-		 * struct file_name_attr. On NTFS 3.0+ the following
-		 * additional index keys are defined:
-		 */
-		struct file_name_attr file_name;	/* $I30 index in directories. */
-		struct sii_index_key sii;	/* $SII index in $Secure. */
-		struct sdh_index_key sdh;	/* $SDH index in $Secure. */
-		struct guid object_id;	/*
-					 * $O index in FILE_Extend/$ObjId: The object_id
-					 * of the mft record found in the data part of
-					 * the index.
-					 */
-		struct reparse_index_key reparse;	/* $R index in FILE_Extend/$Reparse. */
-		struct ntfs_sid sid;	/*
-					 * $O index in FILE_Extend/$Quota:
-					 * SID of the owner of the user_id.
-					 */
-		__le32 owner_id;	/*
-					 * $Q index in FILE_Extend/$Quota:
-					 * user_id of the owner of the quota
-					 * control entry in the data part of
-					 * the index.
-					 */
+		struct file_name_attr file_name;
+		struct sii_index_key sii;
+		struct sdh_index_key sdh;
+		struct guid object_id;
+		struct reparse_index_key reparse;
+		struct ntfs_sid sid;
+		__le32 owner_id;
 	} __packed key;
-	/*
-	 * The (optional) index data is inserted here when creating.
-	 * __le64 vcn;	   If INDEX_ENTRY_NODE bit in flags is set, the last
-	 *		   eight bytes of this index entry contain the virtual
-	 *		   cluster number of the index block that holds the
-	 *		   entries immediately preceding the current entry (the
-	 *		   vcn references the corresponding cluster in the data
-	 *		   of the non-resident index allocation attribute). If
-	 *		   the key_length is zero, then the vcn immediately
-	 *		   follows the INDEX_ENTRY_HEADER. Regardless of
-	 *		   key_length, the address of the 8-byte boundary
-	 *		   aligned vcn of INDEX_ENTRY{_HEADER} *ie is given by
-	 *		   (char*)ie + le16_to_cpu(ie*)->length) - sizeof(VCN),
-	 *		   where sizeof(VCN) can be hardcoded as 8 if wanted.
-	 */
 } __packed;
 
 /*
@@ -2249,68 +2269,79 @@ enum {
 };
 
 /*
- * Attribute: Reparse point (0xc0).
+ * struct reparse_point - $REPARSE_POINT attribute content (0xc0)\
+ *
+ * @reparse_tag:        Reparse point type (with flags; REPARSE_TAG_*).
+ * @reparse_data_length: Byte size of @reparse_data.
+ * @reserved:           Reserved/padding (zero; 8-byte alignment).
+ * @reparse_data:       Variable reparse data (meaning depends on @reparse_tag).
+ *                      - Symbolic link/junction: struct reparse_symlink
+ *                      - Mount point: similar symlink structure
+ *                      - Other tags: vendor-specific or extended data
  *
  * NOTE: Can be resident or non-resident.
  */
 struct reparse_point {
-	__le32 reparse_tag;		/* Reparse point type (inc. flags). */
-	__le16 reparse_data_length;	/* Byte size of reparse data. */
-	__le16 reserved;			/* Align to 8-byte boundary. */
-	u8 reparse_data[0];		/* Meaning depends on reparse_tag. */
+	__le32 reparse_tag;
+	__le16 reparse_data_length;
+	__le16 reserved;
+	u8 reparse_data[0];
 } __packed;
 
 /*
- * Attribute: Extended attribute (EA) information (0xd0).
+ * struct ea_information - $EA_INFORMATION attribute content (0xd0)
+ *
+ * @ea_length:      Byte size of packed EAs.
+ * @need_ea_count:  Number of EAs with NEED_EA bit set.
+ * @ea_query_length: Byte size needed to unpack/query EAs via ZwQueryEaFile().
+ *                   (Unpacked format size.)
  *
  * NOTE: Always resident. (Is this true???)
  */
 struct ea_information {
-	__le16 ea_length;		/* Byte size of the packed extended attributes. */
-	__le16 need_ea_count;	/*
-				 * The number of extended attributes which have
-				 * the NEED_EA bit set.
-				 */
-	__le32 ea_query_length;	/*
-				 * Byte size of the buffer required to query
-				 * the extended attributes when calling
-				 * ZwQueryEaFile() in Windows NT/2k. I.e.
-				 * the byte size of the unpacked extended attributes.
-				 */
+	__le16 ea_length;
+	__le16 need_ea_count;
+	__le32 ea_query_length;
 } __packed;
 
 /*
- * Extended attribute flags (8-bit).
+ * enum - Extended attribute flags (8-bit)
+ *
+ * These flags are stored in the EA header of each extended attribute
+ * (in $EA attribute, type 0xe0).
+ *
+ * @NEED_EA:        If set, the file cannot be properly interpreted
+ *                  without understanding its associated EAs.
+ *                  (Critical EA; applications must process it.)
  */
 enum {
-	NEED_EA	= 0x80		/*
-				 * If set the file to which the EA belongs
-				 * cannot be interpreted without understanding
-				 * the associates extended attributes.
-				 */
+	NEED_EA	= 0x80
 } __packed;
 
 /*
- * Attribute: Extended attribute (EA) (0xe0).
+ * struct ea_attr - Extended attribute (EA) entry (0xe0)
+ *
+ * @next_entry_offset:  Byte offset to the next EA_ATTR entry.
+ *                      (From start of current entry.)
+ * @flags:              EA flags (NEED_EA = 0x80 if critical).
+ * @ea_name_length:     Length of @ea_name in bytes (excluding '\0').
+ * @ea_value_length:    Byte size of the EA value.
+ * @ea_name:            ASCII name of the EA (zero-terminated).
+ *                      Value immediately follows the name.
+ * u8 ea_value[];       The value of the EA.  Immediately follows the name.
+ *
+ * This is one variable-length record in the $EA attribute value.
+ * The attribute can be resident or non-resident.
+ * Sequence of these entries forms the packed EA list.
  *
  * NOTE: Can be resident or non-resident.
- *
- * Like the attribute list and the index buffer list, the EA attribute value is
- * a sequence of EA_ATTR variable length records.
  */
 struct ea_attr {
-	__le32 next_entry_offset;	/* Offset to the next EA_ATTR. */
-	u8 flags;		/* Flags describing the EA. */
-	u8 ea_name_length;	/*
-				 * Length of the name of the EA in bytes
-				 * excluding the '\0' byte terminator.
-				 */
-	__le16 ea_value_length;	/* Byte size of the EA's value. */
-	u8 ea_name[];		/*
-				 * Name of the EA.  Note this is ASCII, not
-				 * Unicode and it is zero terminated.
-				 */
-	/* u8 ea_value[]; */	/* The value of the EA.  Immediately follows the name. */
+	__le32 next_entry_offset;
+	u8 flags;
+	u8 ea_name_length;
+	__le16 ea_value_length;
+	u8 ea_name[];
 } __packed;
 
 #endif /* _LINUX_NTFS_LAYOUT_H */
