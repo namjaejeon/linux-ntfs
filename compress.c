@@ -927,7 +927,12 @@ err_out:
 /* log base 2 of the number of entries in the hash table for match-finding.  */
 #define HASH_SHIFT		14
 
-/* Constant for the multiplicative hash function.  */
+/*
+ * Constant for the multiplicative hash function. These hashing constants
+ * are used solely for the match-finding algorithm during compression.
+ * They are NOT part of the on-disk format. The decompressor does not
+ * utilize this hash.
+ */
 #define HASH_MULTIPLIER		0x1E35A7BD
 
 struct compress_context {
