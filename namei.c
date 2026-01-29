@@ -467,6 +467,18 @@ static struct ntfs_inode *__ntfs_create(struct user_namespace *mnt_userns, struc
 #else
 	inode_init_owner(mnt_userns, vi, dir, mode);
 #endif
+	mode = vi->i_mode;
+
+#ifdef CONFIG_NTFS_FS_POSIX_ACL
+	if (!S_ISLNK(mode) && (sb->s_flags & SB_POSIXACL)) {
+		err = ntfs_init_acl(idmap, vi, dir);
+		if (err)
+			goto err_out;
+	} else
+#endif
+	{
+		vi->i_flags |= S_NOSEC;
+	}
 
 	if (uid_valid(vol->uid))
 		vi->i_uid = vol->uid;
@@ -719,17 +731,6 @@ static struct ntfs_inode *__ntfs_create(struct user_namespace *mnt_userns, struc
 	vi->i_generation = ni->seq_no;
 	set_nlink(vi, 1);
 	ntfs_set_vfs_operations(vi, mode, dev);
-
-#ifdef CONFIG_NTFS_FS_POSIX_ACL
-	if (!S_ISLNK(mode) && (sb->s_flags & SB_POSIXACL)) {
-		err = ntfs_init_acl(idmap, vi, dir);
-		if (err)
-			goto err_out;
-	} else
-#endif
-	{
-		vi->i_flags |= S_NOSEC;
-	}
 
 	/* Done! */
 	kfree(fn);

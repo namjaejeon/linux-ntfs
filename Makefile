@@ -12,6 +12,7 @@ ntfs-y := aops.o attrib.o collate.o dir.o file.o index.o inode.o \
 	  iomap.o debug.o sysctl.o quota.o object_id.o
 
 ccflags-$(CONFIG_NTFS_DEBUG) += -DDEBUG
+ccflags-y += -DCONFIG_NTFS_FS_POSIX_ACL
 else
 # Called from external kernel module build
 

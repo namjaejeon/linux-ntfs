@@ -85,8 +85,8 @@ const struct iomap_folio_ops ntfs_iomap_folio_ops = {
 };
 #endif
 #else
-void ntfs_zero_range_page_done(struct inode *inode, loff_t pos, unsigned int len,
-			       struct page *page)
+static void ntfs_zero_range_page_done(struct inode *inode, loff_t pos, unsigned int len,
+				      struct page *page)
 {
 	struct ntfs_inode *ni = NTFS_I(inode);
 	unsigned long sector_size = 1UL << inode->i_blkbits;
