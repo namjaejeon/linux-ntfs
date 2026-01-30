@@ -1,7 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Exports for NTFS kernel cluster (de)allocation.
- * Part of the Linux-NTFS project.
  *
  * Copyright (c) 2004-2005 Anton Altaparmakov
  */

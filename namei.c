@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * NTFS kernel directory inode operations.
- * Part of the Linux-NTFS project.
  *
  * Copyright (c) 2001-2006 Anton Altaparmakov
  * Copyright (c) 2025 LG Electronics Co., Ltd.

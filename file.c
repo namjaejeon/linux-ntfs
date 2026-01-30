@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 /*
- * NTFS kernel file operations. Part of the Linux-NTFS project.
+ * NTFS kernel file operations.
  *
  * Copyright (c) 2001-2015 Anton Altaparmakov and Tuxera Inc.
  * Copyright (c) 2025 LG Electronics Co., Ltd.

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 /*
- * NTFS kernel mft record operations. Part of the Linux-NTFS project.
- * Part of this file is based on code from the NTFS-3G project.
+ * NTFS kernel mft record operations.
+ * Part of this file is based on code from the NTFS-3G.
  *
  * Copyright (c) 2001-2012 Anton Altaparmakov and Tuxera Inc.
  * Copyright (c) 2002 Richard Russon

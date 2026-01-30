@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 /*
- * NTFS kernel journal handling. Part of the Linux-NTFS project.
+ * NTFS kernel journal handling.
  *
  * Copyright (c) 2002-2007 Anton Altaparmakov
  */

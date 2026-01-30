@@ -1,7 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * Defines for inode structures NTFS Linux kernel driver. Part of
- * the Linux-NTFS project.
+ * Defines for inode structures NTFS Linux kernel driver.
  *
  * Copyright (c) 2001-2007 Anton Altaparmakov
  * Copyright (c) 2002 Richard Russon

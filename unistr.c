@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 /*
- * NTFS Unicode string handling. Part of the Linux-NTFS project.
+ * NTFS Unicode string handling.
  *
  * Copyright (c) 2001-2006 Anton Altaparmakov
  */

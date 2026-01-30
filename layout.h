@@ -1,7 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * All NTFS associated on-disk structures. Part of the Linux-NTFS
- * project.
+ * All NTFS associated on-disk structures.
  *
  * Copyright (c) 2001-2005 Anton Altaparmakov
  * Copyright (c) 2002 Richard Russon
