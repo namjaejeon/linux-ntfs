@@ -676,7 +676,10 @@ void ntfs_set_vfs_operations(struct inode *inode, mode_t mode, dev_t dev)
 			inode->i_op = &ntfs_file_inode_ops;
 			inode->i_fop = &ntfs_file_ops;
 		}
-		inode->i_mapping->a_ops = &ntfs_aops;
+		if (inode->i_ino == FILE_MFT)
+			inode->i_mapping->a_ops = &ntfs_mft_aops;
+		else
+			inode->i_mapping->a_ops = &ntfs_aops;
 	}
 }
 
@@ -1845,7 +1848,13 @@ static int load_attribute_list_mount(struct ntfs_volume *vol,
 		if (al + rl_byte_len > al_end)
 			rl_byte_len = al_end - al;
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 16, 0)
+		err = ntfs_rw_bdev(sb->s_bdev, rl_byte_off,
+				   round_up(rl_byte_len, SECTOR_SIZE),
+				   al, REQ_OP_READ);
+#else
 		err = ntfs_dev_read(sb, al, rl_byte_off, rl_byte_len);
+#endif
 		if (err) {
 			ntfs_error(sb, "Cannot read attribute list.");
 			goto err_out;
@@ -1967,7 +1976,12 @@ int ntfs_read_inode_mount(struct inode *vi)
 		nr_blocks = 1;
 
 	/* Load $MFT/$DATA's first mft record. */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 16, 0)
+	err = ntfs_rw_bdev(sb->s_bdev, ntfs_cluster_to_bytes(vol, vol->mft_lcn) >>
+			   SECTOR_SHIFT, i, (char *)m, REQ_OP_READ);
+#else
 	err = ntfs_dev_read(sb, m, ntfs_cluster_to_bytes(vol, vol->mft_lcn), i);
+#endif
 	if (err) {
 		ntfs_error(sb, "Device read failed.");
 		goto err_out;
@@ -1994,10 +2008,7 @@ int ntfs_read_inode_mount(struct inode *vi)
 	vi->i_generation = ni->seq_no = le16_to_cpu(m->sequence_number);
 
 	/* Provides read_folio() for map_mft_record(). */
-	if (vi->i_ino == FILE_MFT)
-		vi->i_mapping->a_ops = &ntfs_mft_aops;
-	else
-		vi->i_mapping->a_ops = &ntfs_aops;
+	vi->i_mapping->a_ops = &ntfs_mft_aops;
 
 	ctx = ntfs_attr_get_search_ctx(ni, m);
 	if (!ctx) {
@@ -2044,7 +2055,8 @@ int ntfs_read_inode_mount(struct inode *vi)
 			ntfs_error(sb, "Attr_list_size is zero");
 			goto put_err_out;
 		}
-		ni->attr_list = kvzalloc(ni->attr_list_size, GFP_NOFS);
+		ni->attr_list = kvzalloc(round_up(ni->attr_list_size, SECTOR_SIZE),
+					 GFP_NOFS);
 		if (!ni->attr_list) {
 			ntfs_error(sb, "Not enough memory to allocate buffer for attribute list.");
 			goto put_err_out;
