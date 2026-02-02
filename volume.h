@@ -161,9 +161,9 @@ struct ntfs_volume {
  * NV_Errors			Volume has errors, prevent remount rw.
  * NV_ShowSystemFiles		Return system files in ntfs_readdir().
  * NV_CaseSensitive		Treat file names as case sensitive and
- * 				create filenames in the POSIX namespace.
- * 				Otherwise be case insensitive but still
- * 				create file names in POSIX namespace.
+ *				create filenames in the POSIX namespace.
+ *				Otherwise be case insensitive but still
+ *				create file names in POSIX namespace.
  * NV_LogFileEmpty		LogFile journal is empty.
  * NV_QuotaOutOfDate		Quota is out of date.
  * NV_UsnJrnlStamped		UsnJrnl has been stamped.
@@ -175,8 +175,8 @@ struct ntfs_volume {
  * NV_ShowHiddenFiles		Return hidden files in ntfs_readdir().
  * NV_HideDotFiles		Hide names beginning with a dot (".").
  * NV_CheckWindowsNames		Refuse creation/rename of files with
- * 				Windows-reserved names (CON, AUX, NUL, COM1,
- * 				LPT1, etc.) or invalid characters.
+ *				Windows-reserved names (CON, AUX, NUL, COM1,
+ *				LPT1, etc.) or invalid characters.
  *
  * NV_Discard			Issue discard/TRIM commands for freed clusters.
  * NV_DisableSparse		Disable creation of sparse regions.

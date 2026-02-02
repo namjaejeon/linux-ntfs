@@ -1964,7 +1964,7 @@ int ntfs_read_inode_mount(struct inode *vi)
 	if (i < sb->s_blocksize)
 		i = sb->s_blocksize;
 
-	m = (struct mft_record *)kzalloc(i, GFP_NOFS);
+	m = kzalloc(i, GFP_NOFS);
 	if (!m) {
 		ntfs_error(sb, "Failed to allocate buffer for $MFT record 0.");
 		goto err_out;

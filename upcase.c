@@ -52,7 +52,7 @@ __le16 *generate_default_upcase(void)
 	int i, r;
 	__le16 *uc;
 
-	uc = kvzalloc(default_upcase_len * sizeof(__le16), GFP_NOFS);
+	uc = kvcalloc(default_upcase_len, sizeof(__le16), GFP_NOFS);
 	if (!uc)
 		return uc;
 	/* Generate the little endian Unicode upcase table used by ntfs. */

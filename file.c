@@ -258,65 +258,64 @@ static int ntfs_setattr_size(struct inode *vi, struct iattr *attr)
 {
 	struct ntfs_inode *ni = NTFS_I(vi);
 	int err;
+	loff_t old_size = vi->i_size;
 
 	if (NInoCompressed(ni) || NInoEncrypted(ni)) {
 		ntfs_warning(vi->i_sb,
 			"Changes in inode size are not supported yet for %s files, ignoring.",
 			NInoCompressed(ni) ? "compressed" : "encrypted");
 		return -EOPNOTSUPP;
-	} else {
-		loff_t old_size = vi->i_size;
+	}
 
-		err = inode_newsize_ok(vi, attr->ia_size);
+	err = inode_newsize_ok(vi, attr->ia_size);
+	if (err)
+		return err;
+
+	inode_dio_wait(vi);
+	/* Serialize against page faults */
+	if (NInoNonResident(NTFS_I(vi)) && attr->ia_size < old_size) {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
+		err = iomap_truncate_page(vi, attr->ia_size, NULL,
+				&ntfs_read_iomap_ops,
+				&ntfs_iomap_folio_ops, NULL);
+#else
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 15, 0)
+		err = iomap_truncate_page(vi, attr->ia_size, NULL,
+				&ntfs_read_iomap_ops, NULL);
+#else
+		err = iomap_truncate_page(vi, attr->ia_size, NULL,
+				&ntfs_read_iomap_ops);
+#endif
+#endif
 		if (err)
 			return err;
+	}
 
-		inode_dio_wait(vi);
-		/* Serialize against page faults */
-		if (NInoNonResident(NTFS_I(vi)) && attr->ia_size < old_size) {
+	truncate_setsize(vi, attr->ia_size);
+	err = ntfs_truncate_vfs(vi, attr->ia_size, old_size);
+	if (err) {
+		i_size_write(vi, old_size);
+		return err;
+	}
+
+	if (NInoNonResident(ni) && attr->ia_size > old_size &&
+	    old_size % PAGE_SIZE != 0) {
+		loff_t len = min_t(loff_t,
+				round_up(old_size, PAGE_SIZE) - old_size,
+				attr->ia_size - old_size);
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
-			err = iomap_truncate_page(vi, attr->ia_size, NULL,
-					&ntfs_read_iomap_ops,
-					&ntfs_iomap_folio_ops, NULL);
+		err = iomap_zero_range(vi, old_size, len,
+				NULL, &ntfs_seek_iomap_ops,
+				&ntfs_iomap_folio_ops, NULL);
 #else
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 15, 0)
-			err = iomap_truncate_page(vi, attr->ia_size, NULL,
-					&ntfs_read_iomap_ops, NULL);
+		err = iomap_zero_range(vi, old_size, len,
+				NULL, &ntfs_seek_iomap_ops, NULL);
 #else
-			err = iomap_truncate_page(vi, attr->ia_size, NULL,
-					&ntfs_read_iomap_ops);
+		err = iomap_zero_range(vi, old_size, len,
+				NULL, &ntfs_seek_iomap_ops);
 #endif
 #endif
-			if (err)
-				return err;
-		}
-
-		truncate_setsize(vi, attr->ia_size);
-		err = ntfs_truncate_vfs(vi, attr->ia_size, old_size);
-		if (err) {
-			i_size_write(vi, old_size);
-			return err;
-		}
-
-		if (NInoNonResident(ni) && attr->ia_size > old_size &&
-		    old_size % PAGE_SIZE != 0) {
-			loff_t len = min_t(loff_t,
-					round_up(old_size, PAGE_SIZE) - old_size,
-					attr->ia_size - old_size);
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
-			err = iomap_zero_range(vi, old_size, len,
-					NULL, &ntfs_seek_iomap_ops,
-					&ntfs_iomap_folio_ops, NULL);
-#else
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 15, 0)
-			err = iomap_zero_range(vi, old_size, len,
-					NULL, &ntfs_seek_iomap_ops, NULL);
-#else
-			err = iomap_zero_range(vi, old_size, len,
-					NULL, &ntfs_seek_iomap_ops);
-#endif
-#endif
-		}
 	}
 
 	return err;
@@ -1177,9 +1176,9 @@ out:
 #endif
 
 #define NTFS_FALLOC_FL_SUPPORTED					\
-		FALLOC_FL_ALLOCATE_RANGE | FALLOC_FL_KEEP_SIZE |	\
-		FALLOC_FL_INSERT_RANGE | FALLOC_FL_PUNCH_HOLE |		\
-		FALLOC_FL_COLLAPSE_RANGE
+		(FALLOC_FL_ALLOCATE_RANGE | FALLOC_FL_KEEP_SIZE |	\
+		 FALLOC_FL_INSERT_RANGE | FALLOC_FL_PUNCH_HOLE |	\
+		 FALLOC_FL_COLLAPSE_RANGE)
 
 static long ntfs_fallocate(struct file *file, int mode, loff_t offset, loff_t len)
 {

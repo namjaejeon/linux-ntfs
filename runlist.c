@@ -1729,7 +1729,7 @@ merge_src_rle:
 	new_2nd_cnt = src_cnt;
 	new_cnt = new_1st_cnt + new_2nd_cnt + new_3rd_cnt;
 	new_cnt += dst_rl_split.lcn >= LCN_HOLE ? 1 : 0;
-	new_rl = kvzalloc(new_cnt * sizeof(*new_rl), GFP_NOFS);
+	new_rl = kvcalloc(new_cnt, sizeof(*new_rl), GFP_NOFS);
 	if (!new_rl)
 		return ERR_PTR(-ENOMEM);
 
@@ -1813,13 +1813,13 @@ struct runlist_element *ntfs_rl_punch_hole(struct runlist_element *dst_rl, int d
 
 	punch_cnt = (int)(e_rl - s_rl) + 1;
 
-	*punch_rl = kvzalloc((punch_cnt + 1) * sizeof(struct runlist_element),
+	*punch_rl = kvcalloc((punch_cnt + 1), sizeof(struct runlist_element),
 			GFP_NOFS);
 	if (!*punch_rl)
 		return ERR_PTR(-ENOMEM);
 
 	new_cnt = dst_cnt - (int)(e_rl - s_rl + 1) + 3;
-	new_rl = kvzalloc(new_cnt * sizeof(struct runlist_element), GFP_NOFS);
+	new_rl = kvcalloc(new_cnt, sizeof(struct runlist_element), GFP_NOFS);
 	if (!new_rl) {
 		kvfree(*punch_rl);
 		*punch_rl = NULL;
@@ -1963,13 +1963,13 @@ struct runlist_element *ntfs_rl_collapse_range(struct runlist_element *dst_rl, i
 	one_split_3 = e_rl == s_rl && begin_split && end_split ? true : false;
 
 	punch_cnt = (int)(e_rl - s_rl) + 1;
-	*punch_rl = kvzalloc((punch_cnt + 1) * sizeof(struct runlist_element),
+	*punch_rl = kvcalloc(punch_cnt + 1, sizeof(struct runlist_element),
 			GFP_NOFS);
 	if (!*punch_rl)
 		return ERR_PTR(-ENOMEM);
 
 	new_cnt = dst_cnt - (int)(e_rl - s_rl + 1) + 3;
-	new_rl = kvzalloc(new_cnt * sizeof(struct runlist_element), GFP_NOFS);
+	new_rl = kvcalloc(new_cnt, sizeof(struct runlist_element), GFP_NOFS);
 	if (!new_rl) {
 		kvfree(*punch_rl);
 		*punch_rl = NULL;

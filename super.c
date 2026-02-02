@@ -1332,7 +1332,7 @@ static bool load_and_init_attrdef(struct ntfs_volume *vol)
 	i_size = i_size_read(ino);
 	if (i_size <= 0 || i_size > 0x7fffffff)
 		goto iput_failed;
-	vol->attrdef = (struct attr_def *)kvzalloc(i_size, GFP_NOFS);
+	vol->attrdef = kvzalloc(i_size, GFP_NOFS);
 	if (!vol->attrdef)
 		goto iput_failed;
 	index = 0;
@@ -1416,7 +1416,7 @@ static bool load_and_init_upcase(struct ntfs_volume *vol)
 	if (!i_size || i_size & (sizeof(__le16) - 1) ||
 			i_size > 64ULL * 1024 * sizeof(__le16))
 		goto iput_upcase_failed;
-	vol->upcase = (__le16 *)kvzalloc(i_size, GFP_NOFS);
+	vol->upcase = kvzalloc(i_size, GFP_NOFS);
 	if (!vol->upcase)
 		goto iput_upcase_failed;
 	index = 0;

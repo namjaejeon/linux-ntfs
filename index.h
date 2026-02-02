@@ -21,7 +21,7 @@
 /*
  * @idx_ni:	index inode containing the @entry described by this context
  * @name:	Unicode name of the indexed attribute
- * 		(usually $I30 for directories)
+ *		(usually $I30 for directories)
  * @name_len:	length of @name in Unicode characters
  * @entry:	index entry (points into @ir or @ia)
  * @cr:		creation time of the entry (for sorting/validation)
@@ -35,7 +35,7 @@
  * @parent_pos:	array of parent entry positions in the B-tree nodes
  * @parent_vcn:	VCNs of parent index blocks in the B-tree traversal
  * @pindex:	current depth (number of parent nodes) in the traversal
- * 		(maximum is MAX_PARENT_VCN)
+ *		(maximum is MAX_PARENT_VCN)
  * @ib_dirty:	true if the current index block (@ia/@ib) was modified
  * @block_size:	size of index blocks in bytes (from $INDEX_ROOT or $Boot)
  * @vcn_size_bits: log2(cluster size)

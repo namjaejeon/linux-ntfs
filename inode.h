@@ -162,22 +162,22 @@ struct ntfs_inode {
  * NI_AttrListDirty		Mft record contains an attribute list.
  * NI_AttrList			Mft record contains an attribute list.
  * NI_AttrListNonResident	Attribute list is non-resident. Implies
- * 				NI_AttrList is set.
+ *				NI_AttrList is set.
  * NI_Attr			1: Fake inode for attribute i/o.
- * 				0: Real inode or extent inode.
+ *				0: Real inode or extent inode.
  * NI_MstProtected		Attribute is protected by MST fixups.
  * NI_NonResident		Unnamed data attr is non-resident (f)
- * 				Attribute is non-resident (a).
+ *				Attribute is non-resident (a).
  * NI_IndexAllocPresent		$I30 index alloc attr is present (d).
  * NI_Compressed		Unnamed data attr is compressed (f).
- * 				Create compressed files by default (d).
- * 				Attribute is compressed (a).
+ *				Create compressed files by default (d).
+ *				Attribute is compressed (a).
  * NI_Encrypted			Unnamed data attr is encrypted (f).
- * 				Create encrypted files by default (d).
- * 				Attribute is encrypted (a).
+ *				Create encrypted files by default (d).
+ *				Attribute is encrypted (a).
  * NI_Sparse			Unnamed data attr is sparse (f).
- * 				Create sparse files by default (d).
- * 				Attribute is sparse (a).
+ *				Create sparse files by default (d).
+ *				Attribute is sparse (a).
  * NI_SparseDisabled		May not create sparse regions.
  * NI_FullyMapped		Runlist is fully mapped.
  * NI_FileNameDirty		FILE_NAME attributes need to be updated.

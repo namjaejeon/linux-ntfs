@@ -244,8 +244,8 @@ static int ntfs_read_iomap_begin_resident(struct inode *inode, loff_t offset, lo
 			iomap->offset = offset;
 			iomap->length = length;
 		}
-                goto out;
-        }
+		goto out;
+	}
 
 	kattr = (u8 *)ctx->attr + le16_to_cpu(ctx->attr->data.resident.value_offset);
 

@@ -2302,7 +2302,7 @@ static int ntfs_mft_record_format(const struct ntfs_volume *vol, const s64 mft_n
  * ntfs_mft_record_alloc - allocate an mft record on an ntfs volume
  * @vol:	[IN]  volume on which to allocate the mft record
  * @mode:	[IN]  mode if want a file or directory, i.e. base inode or 0
- * @ni: 	[OUT] on success, set to the allocated ntfs inode
+ * @ni:		[OUT] on success, set to the allocated ntfs inode
  * @base_ni:	[IN]  open base inode if allocating an extent mft record or NULL
  * @ni_mrec:	[OUT] on successful return this is the mapped mft record
  *

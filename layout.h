@@ -141,16 +141,16 @@ static_assert(sizeof(struct ntfs_boot_sector) == 512);
  * magic_HOLE:      Hole marker ("HOLE" in ASCII).
  *                  Introduced in NTFS 3.0+, used for sparse/hole regions in some contexts.
  * magic_RSTR:      Restart page header ("RSTR" in ASCII).
- *                  Used in $LogFile for restart pages (transaction log recovery).
+ *                  Used in LogFile for restart pages (transaction log recovery).
  * magic_RCRD:      Log record page header ("RCRD" in ASCII).
- *                  Used in $LogFile for individual log record pages.
+ *                  Used in LogFile for individual log record pages.
  * magic_CHKD:      Chkdsk modified marker ("CHKD" in ASCII).
  *                  Set by chkdsk when it modifies a record; indicates repair was done.
  * magic_BAAD:      Bad record marker ("BAAD" in ASCII).
  *                  Indicates a multi-sector transfer failure was detected.
  *                  The record is corrupted/unusable; often set during I/O errors.
  * magic_empty:     Empty/uninitialized page marker (0xffffffff).
- *                  Used in $LogFile when a page is filled with 0xff bytes
+ *                  Used in LogFile when a page is filled with 0xff bytes
  *                  and has not yet been initialized. Must be formatted before use.
  */
 enum {
@@ -261,7 +261,7 @@ struct ntfs_record {
  *                  in its data attribute.
  *                  If cluster size > 4 KiB, copies first N records where
  *                  N = cluster_size / mft_record_size.
- * FILE_LogFile:    Journaling log ($LogFile) in data attribute.
+ * FILE_LogFile:    Journaling log (LogFile) in data attribute.
  *                  Used for transaction logging and recovery.
  * FILE_Volume:     Volume information and name.
  *                  Contains $VolumeName (label) and $VolumeInformation
@@ -393,7 +393,7 @@ enum {
  *                      See ntfs_record magic enum for other values.
  * usa_ofs:             Offset to Update Sequence Array (see ntfs_record).
  * usa_count:           Number of entries in USA (see ntfs_record).
- * lsn:                 Log sequence number (LSN) from $LogFile.
+ * lsn:                 Log sequence number (LSN) from LogFile.
  *                      Incremented on every modification to this record.
  * sequence_number:     Reuse count of this MFT record slot.
  *                      Incremented (skipping zero) when the file is deleted.
@@ -456,7 +456,7 @@ static_assert(sizeof(struct mft_record) == 48);
  *                      See ntfs_record magic enum for other values.
  * @usa_ofs:            Offset to Update Sequence Array (see ntfs_record).
  * @usa_count:          Number of entries in USA (see ntfs_record).
- * @lsn:                Log sequence number (LSN) from $LogFile.
+ * @lsn:                Log sequence number (LSN) from LogFile.
  *                      Incremented on every modification to this record.
  * @sequence_number:    Reuse count of this MFT record slot.
  *                      Incremented (skipping zero) when the file is deleted.
@@ -605,7 +605,7 @@ enum {
  *                          (e.g., named $DATA streams or alternate data streams)
  * ATTR_DEF_RESIDENT:       Attribute must be resident (stored in MFT record).
  *                          (Cannot be non-resident/sparse/compressed)
- * ATTR_DEF_ALWAYS_LOG:     Always log modifications to this attribute in $LogFile,
+ * ATTR_DEF_ALWAYS_LOG:     Always log modifications to this attribute in LogFile,
  *                          regardless of whether it is resident or non-resident.
  *                          Without this flag, modifications are logged only if resident.
  *                          (Used for critical metadata attributes)
@@ -635,7 +635,7 @@ enum {
  *                  Zero-terminated string, maximum 0x40 characters (128 bytes).
  *                  Used for human-readable display and debugging.
  * @type:           Attribute type code (ATTR_TYPE_* constants).
- *                  Defines which attribute this entry describes (e.g. 0x10 = $STANDARD_INFORMATION).
+ *                  Defines which attribute this entry describes.
  * @display_rule:   Default display rule (usually 0; rarely used in modern NTFS).
  *                  Controls how the attribute is displayed in tools (legacy).
  * @collation_rule: Default collation rule for indexing this attribute.
@@ -1761,7 +1761,7 @@ struct sdh_index_key {
  * They indicate volume state and required actions.
  *
  * VOLUME_IS_DIRTY:                Volume is dirty (needs chkdsk).
- * VOLUME_RESIZE_LOG_FILE:         Resize $LogFile on next mount.
+ * VOLUME_RESIZE_LOG_FILE:         Resize LogFile on next mount.
  * VOLUME_UPGRADE_ON_MOUNT:        Upgrade volume on mount (old NTFS).
  * VOLUME_MOUNTED_ON_NT4:          Mounted on NT4 (compatibility flag).
  * VOLUME_DELETE_USN_UNDERWAY:     USN journal deletion in progress.
@@ -2284,7 +2284,7 @@ struct reparse_point {
 	__le32 reparse_tag;
 	__le16 reparse_data_length;
 	__le16 reserved;
-	u8 reparse_data[0];
+	u8 reparse_data[];
 } __packed;
 
 /*

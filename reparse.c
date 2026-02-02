@@ -486,7 +486,7 @@ int ntfs_reparse_set_wsl_symlink(struct ntfs_inode *ni,
 		return -EINVAL;
 
 	reparse_len = sizeof(struct reparse_point) + sizeof(data->type) + len;
-	reparse = (struct reparse_point *)kvzalloc(reparse_len, GFP_NOFS);
+	reparse = kvzalloc(reparse_len, GFP_NOFS);
 	if (!reparse) {
 		err = -ENOMEM;
 		kvfree(utarget);
@@ -532,7 +532,7 @@ int ntfs_reparse_set_wsl_not_symlink(struct ntfs_inode *ni, mode_t mode)
 		return -EOPNOTSUPP;
 
 	reparse_len = sizeof(struct reparse_point) + len;
-	reparse = (struct reparse_point *)kvzalloc(reparse_len, GFP_NOFS);
+	reparse = kvzalloc(reparse_len, GFP_NOFS);
 	if (!reparse)
 		err = -ENOMEM;
 	else {
