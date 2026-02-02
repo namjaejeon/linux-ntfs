@@ -3050,6 +3050,18 @@ static s64 lcn_from_index(struct ntfs_volume *vol, struct ntfs_inode *ni,
 	return lcn;
 }
 
+/*
+ * ntfs_write_mft_block - Write back a folio containing MFT records
+ * @folio:	The folio to write back (contains one or more MFT records)
+ * @wbc:	Writeback control structure
+ *
+ * This function is called as part of the address_space_operations
+ * .writepages implementation for the $MFT inode (or $MFTMirr).
+ * It handles writing one folio (normally 4KiB page) worth of MFT records
+ * to the underlying block device.
+ *
+ * Return: 0 on success, or -errno on error.
+ */
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 10, 0)
 int ntfs_write_mft_block(struct folio *folio, struct writeback_control *wbc)
