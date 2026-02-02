@@ -359,11 +359,9 @@ int ntfs_setattr(struct user_namespace *mnt_userns, struct dentry *dentry,
 		ntfs_set_volume_flags(vol, VOLUME_IS_DIRTY);
 
 	if (ia_valid & ATTR_SIZE) {
-		if (attr->ia_size != vi->i_size) {
-			err = ntfs_setattr_size(vi, attr);
-			if (err)
-				goto out;
-		}
+		err = ntfs_setattr_size(vi, attr);
+		if (err)
+			goto out;
 
 		ia_valid |= ATTR_MTIME | ATTR_CTIME;
 	}
