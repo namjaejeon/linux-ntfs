@@ -97,15 +97,6 @@ int ntfs_mft_records_write(const struct ntfs_volume *vol, const u64 mref,
 		const s64 count, struct mft_record *b);
 int ntfs_mft_record_check(const struct ntfs_volume *vol, struct mft_record *m,
 			  unsigned long mft_no);
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 10, 0)
-int ntfs_write_mft_block(struct folio *folio, struct writeback_control *wbc);
-#else
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
-int ntfs_write_mft_block(struct folio *folio, struct writeback_control *wbc,
-			 void *data)
-#else
-int ntfs_write_mft_block(struct page *page, struct writeback_control *wbc,
-			 void *data)
-#endif
-#endif
+int ntfs_mft_writepages(struct address_space *mapping,
+		struct writeback_control *wbc);
 #endif /* _LINUX_NTFS_MFT_H */

@@ -352,27 +352,6 @@ static void ntfs_readahead(struct readahead_control *rac)
 #endif
 }
 
-static int ntfs_mft_writepages(struct address_space *mapping,
-			       struct writeback_control *wbc)
-{
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 10, 0)
-	struct folio *folio = NULL;
-	int error;
-#endif
-
-	if (NVolShutdown(NTFS_I(mapping->host)->vol))
-		return -EIO;
-
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 10, 0)
-	while ((folio = writeback_iter(mapping, wbc, folio, &error)))
-		error = ntfs_write_mft_block(folio, wbc);
-	return error;
-#else
-	return write_cache_pages(mapping, wbc,
-				 ntfs_write_mft_block, mapping);
-#endif
-}
-
 static int ntfs_writepages(struct address_space *mapping,
 		struct writeback_control *wbc)
 {

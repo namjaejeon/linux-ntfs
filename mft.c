@@ -8,6 +8,7 @@
  * Copyright (c) 2025 LG Electronics Co., Ltd.
  */
 
+#include <linux/writeback.h>
 #include <linux/bio.h>
 
 #include "aops.h"
@@ -3064,16 +3065,16 @@ static s64 lcn_from_index(struct ntfs_volume *vol, struct ntfs_inode *ni,
  */
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 10, 0)
-int ntfs_write_mft_block(struct folio *folio, struct writeback_control *wbc)
+static int ntfs_write_mft_block(struct folio *folio, struct writeback_control *wbc)
 {
 #else
-int ntfs_write_mft_block(struct folio *folio, struct writeback_control *wbc,
-			 void *data)
+static int ntfs_write_mft_block(struct folio *folio, struct writeback_control *wbc,
+		void *data)
 #endif
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 10, 0)
 	struct address_space *mapping = folio->mapping;
 #else
-    struct address_space *mapping = data;
+	struct address_space *mapping = data;
 #endif
 	struct inode *vi = mapping->host;
 	struct ntfs_inode *ni = NTFS_I(vi);
@@ -3272,8 +3273,8 @@ unm_done:
 	return err;
 }
 #else
-int ntfs_write_mft_block(struct page *page, struct writeback_control *wbc,
-			 void *data)
+static int ntfs_write_mft_block(struct page *page, struct writeback_control *wbc,
+		void *data)
 {
 	struct address_space *mapping = data;
 	struct inode *vi = mapping->host;
@@ -3474,3 +3475,36 @@ unm_done:
 	return err;
 }
 #endif
+
+/*
+ * ntfs_mft_writepages - Write back dirty folios for the $MFT inode
+ * @mapping:	address space of the $MFT inode
+ * @wbc:	writeback control
+ *
+ * Writeback iterator for MFT records. Iterates over dirty folios and
+ * delegates actual writing to ntfs_write_mft_block() for each folio.
+ * Called from the address_space_operations .writepages vector of the
+ * $MFT inode.
+ *
+ * Returns 0 on success, or the first error encountered.
+ */
+int ntfs_mft_writepages(struct address_space *mapping,
+		struct writeback_control *wbc)
+{
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 10, 0)
+	struct folio *folio = NULL;
+	int error;
+#endif
+
+	if (NVolShutdown(NTFS_I(mapping->host)->vol))
+		return -EIO;
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 10, 0)
+	while ((folio = writeback_iter(mapping, wbc, folio, &error)))
+		error = ntfs_write_mft_block(folio, wbc);
+	return error;
+#else
+	return write_cache_pages(mapping, wbc,
+				 ntfs_write_mft_block, mapping);
+#endif
+}
