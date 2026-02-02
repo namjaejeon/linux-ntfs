@@ -5,18 +5,21 @@
  * Copyright (c) 2026 LG Electronics Co., Ltd.
  */
 
+#include <linux/blkdev.h>
+
 #include "ntfs.h"
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 16, 0)
-int ntfs_rw_bdev(struct block_device *bdev, sector_t sector, unsigned int count,
-		 char *data, enum req_op op)
+int ntfs_bdev_read(struct block_device *bdev, sector_t sector, unsigned int count,
+		 char *data)
 {
-	unsigned int		done = 0, added;
-	int			error;
-	struct bio		*bio;
+	unsigned int done = 0, added;
+	int error;
+	struct bio *bio;
+	enum req_op op;
 
-	op |= REQ_META | REQ_SYNC;
+	op = REQ_OP_READ | REQ_META | REQ_SYNC;
 	if (!is_vmalloc_addr(data))
 		return bdev_rw_virt(bdev, sector, data, count, op);
 

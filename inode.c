@@ -1849,9 +1849,9 @@ static int load_attribute_list_mount(struct ntfs_volume *vol,
 			rl_byte_len = al_end - al;
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 16, 0)
-		err = ntfs_rw_bdev(sb->s_bdev, rl_byte_off,
+		err = ntfs_bdev_read(sb->s_bdev, rl_byte_off,
 				   round_up(rl_byte_len, SECTOR_SIZE),
-				   al, REQ_OP_READ);
+				   al);
 #else
 		err = ntfs_dev_read(sb, al, rl_byte_off, rl_byte_len);
 #endif
@@ -1977,8 +1977,8 @@ int ntfs_read_inode_mount(struct inode *vi)
 
 	/* Load $MFT/$DATA's first mft record. */
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 16, 0)
-	err = ntfs_rw_bdev(sb->s_bdev, ntfs_cluster_to_bytes(vol, vol->mft_lcn) >>
-			   SECTOR_SHIFT, i, (char *)m, REQ_OP_READ);
+	err = ntfs_bdev_read(sb->s_bdev, ntfs_cluster_to_bytes(vol, vol->mft_lcn) >>
+			   SECTOR_SHIFT, i, (char *)m);
 #else
 	err = ntfs_dev_read(sb, m, ntfs_cluster_to_bytes(vol, vol->mft_lcn), i);
 #endif

@@ -564,7 +564,7 @@ static char *read_ntfs_boot_sector(struct super_block *sb,
 		return NULL;
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 16, 0)
-	if (ntfs_rw_bdev(sb->s_bdev, 0, PAGE_SIZE, boot_sector, REQ_OP_READ)) {
+	if (ntfs_bdev_read(sb->s_bdev, 0, PAGE_SIZE, boot_sector)) {
 #else
 	if (ntfs_dev_read(sb, boot_sector, 0, PAGE_SIZE)) {
 #endif

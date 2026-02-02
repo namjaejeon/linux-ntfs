@@ -5,8 +5,6 @@
  * Copyright (c) 2002-2007 Anton Altaparmakov
  */
 
-#include <linux/bio.h>
-
 #include "attrib.h"
 #include "aops.h"
 #include "logfile.h"
