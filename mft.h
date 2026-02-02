@@ -108,5 +108,4 @@ int ntfs_write_mft_block(struct page *page, struct writeback_control *wbc,
 			 void *data)
 #endif
 #endif
-sector_t ntfs_bmap(struct address_space *mapping, sector_t block);
 #endif /* _LINUX_NTFS_MFT_H */
