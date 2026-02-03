@@ -77,7 +77,7 @@ static int ntfs_file_open(struct inode *vi, struct file *filp)
 		mutex_unlock(&ni->mrec_lock);
 	}
 
-	filp->f_mode |= FMODE_NOWAIT;
+	filp->f_mode |= FMODE_NOWAIT | FMODE_CAN_ODIRECT;
 
 	return generic_file_open(vi, filp);
 }
