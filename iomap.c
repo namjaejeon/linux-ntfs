@@ -13,11 +13,10 @@
 #include "attrib.h"
 #include "mft.h"
 #include "ntfs.h"
-#include "malloc.h"
 #include "iomap.h"
 
 /*
- * ioomap_zero_range is called for an area beyond the initialized size,
+ * iomap_zero_range is called for an area beyond the initialized size,
  * garbage values can be read, so zeroing out is needed.
  */
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0)
@@ -86,8 +85,8 @@ const struct iomap_folio_ops ntfs_iomap_folio_ops = {
 };
 #endif
 #else
-void ntfs_zero_range_page_done(struct inode *inode, loff_t pos, unsigned int len,
-			       struct page *page)
+static void ntfs_zero_range_page_done(struct inode *inode, loff_t pos, unsigned int len,
+				      struct page *page)
 {
 	struct ntfs_inode *ni = NTFS_I(inode);
 	unsigned long sector_size = 1UL << inode->i_blkbits;
@@ -181,19 +180,19 @@ static bool ntfs_iomap_valid(struct inode *inode, const struct iomap *iomap)
 #endif
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
-const struct iomap_write_ops ntfs_zero_iomap_folio_ops = {
+static const struct iomap_write_ops ntfs_zero_iomap_folio_ops = {
 	.put_folio = ntfs_iomap_put_folio,
 	.iomap_valid = ntfs_iomap_valid,
 };
 #else
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0)
-const struct iomap_folio_ops ntfs_zero_iomap_folio_ops = {
+static const struct iomap_folio_ops ntfs_zero_iomap_folio_ops = {
 	.put_folio = ntfs_iomap_put_folio,
 	.iomap_valid = ntfs_iomap_valid,
 };
 #else
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
-const struct iomap_page_ops ntfs_zero_iomap_page_ops = {
+static const struct iomap_page_ops ntfs_zero_iomap_page_ops = {
 	.page_done = ntfs_zero_range_page_done,
 	.iomap_valid = ntfs_iomap_valid,
 };
@@ -201,7 +200,7 @@ const struct iomap_page_ops ntfs_zero_iomap_page_ops = {
 #endif
 #endif
 
-static int ntfs_read_iomap_begin_resident(struct inode *inode, loff_t offset,
+static int ntfs_read_iomap_begin_resident(struct inode *inode, loff_t offset, loff_t length,
 		unsigned int flags, struct iomap *iomap)
 {
 	struct ntfs_inode *base_ni, *ni = NTFS_I(inode);
@@ -240,8 +239,11 @@ static int ntfs_read_iomap_begin_resident(struct inode *inode, loff_t offset,
 	if (offset >= attr_len) {
 		if (flags & IOMAP_REPORT)
 			err = -ENOENT;
-		else
-			err = -EFAULT;
+		else {
+			iomap->type = IOMAP_HOLE;
+			iomap->offset = offset;
+			iomap->length = length;
+		}
 		goto out;
 	}
 
@@ -255,7 +257,7 @@ static int ntfs_read_iomap_begin_resident(struct inode *inode, loff_t offset,
 
 	iomap->type = IOMAP_INLINE;
 	iomap->offset = 0;
-	iomap->length = min_t(loff_t, attr_len, PAGE_SIZE);
+	iomap->length = attr_len;
 
 out:
 	if (ctx)
@@ -264,12 +266,55 @@ out:
 	return err;
 }
 
+/*
+ * ntfs_read_iomap_begin_non_resident - map non-resident NTFS file data
+ * @inode:		inode to map
+ * @offset:		file offset to map
+ * @length:		length of mapping
+ * @flags:		IOMAP flags
+ * @iomap:		iomap structure to fill
+ * @need_unwritten:	true if UNWRITTEN extent type is needed
+ *
+ * Map a range of a non-resident NTFS file to an iomap extent.
+ *
+ * NTFS UNWRITTEN extent handling:
+ * ================================
+ * The concept of an unwritten extent in NTFS is slightly different from
+ * that of other filesystems. NTFS conceptually manages only a single
+ * continuous unwritten region, which is strictly defined based on
+ * initialized_size.
+ *
+ * File offset layout:
+ *   0                        initialized_size                   i_size(EOF)
+ *   |----------#0----------|----------#1----------|----------#2----------|
+ *   | Actual data          | Pre-allocated        | Pre-allocated        |
+ *   | (user written)       | (within initialized) | (initialized ~ EOF)  |
+ *   |----------------------|----------------------|----------------------|
+ *   MAPPED                 MAPPED                 UNWRITTEN (conditionally)
+ *
+ * Region #0: User-written data, initialized and valid.
+ * Region #1: Pre-allocated within initialized_size, must be zero-initialized
+ *            by the filesystem before exposure to userspace.
+ * Region #2: Pre-allocated beyond initialized_size, does not need initialization.
+ *
+ * The @need_unwritten parameter controls whether region #2 is mapped as
+ * IOMAP_UNWRITTEN or IOMAP_MAPPED:
+ * - For seek operations (SEEK_DATA/SEEK_HOLE): IOMAP_MAPPED is needed to
+ *   prevent iomap_seek_data from incorrectly interpreting pre-allocated
+ *   space as a hole. Since NTFS does not support multiple unwritten extents,
+ *   all pre-allocated regions should be treated as data, not holes.
+ * - For zero_range operations: IOMAP_MAPPED is needed to be zeroed out.
+ *
+ * Return: 0 on success, negative error code on failure.
+ */
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 17, 0)
 static int ntfs_read_iomap_begin_non_resident(struct inode *inode, loff_t offset,
-		loff_t length, unsigned int flags, struct iomap *iomap, bool for_clu_zero)
+		loff_t length, unsigned int flags, struct iomap *iomap,
+		bool for_clu_zero, bool need_unwritten)
 #else
 static int ntfs_read_iomap_begin_non_resident(struct inode *inode, loff_t offset,
-		loff_t length, unsigned int flags, struct iomap *iomap)
+		loff_t length, unsigned int flags, struct iomap *iomap,
+		bool need_unwritten)
 #endif
 {
 	struct ntfs_inode *ni = NTFS_I(inode);
@@ -280,8 +325,8 @@ static int ntfs_read_iomap_begin_non_resident(struct inode *inode, loff_t offset
 	loff_t vcn_ofs;
 	loff_t rl_length;
 
-	vcn = NTFS_B_TO_CLU(vol, offset);
-	vcn_ofs = NTFS_B_TO_CLU_OFS(vol, offset);
+	vcn = ntfs_bytes_to_cluster(vol, offset);
+	vcn_ofs = ntfs_bytes_to_cluster_off(vol, offset);
 
 	down_write(&ni->runlist.lock);
 	rl = ntfs_attr_vcn_to_rl(ni, vcn, &lcn);
@@ -310,14 +355,14 @@ static int ntfs_read_iomap_begin_non_resident(struct inode *inode, loff_t offset
 			iomap->type = IOMAP_HOLE;
 		iomap->addr = IOMAP_NULL_ADDR;
 	} else {
-		if (!(flags & IOMAP_ZERO) && offset >= ni->initialized_size)
+		if (need_unwritten && offset >= ni->initialized_size)
 			iomap->type = IOMAP_UNWRITTEN;
 		else
 			iomap->type = IOMAP_MAPPED;
-		iomap->addr = NTFS_CLU_TO_B(vol, lcn) + vcn_ofs;
+		iomap->addr = ntfs_cluster_to_bytes(vol, lcn) + vcn_ofs;
 	}
 
-	rl_length = NTFS_CLU_TO_B(vol, rl->length - (vcn - rl->vcn));
+	rl_length = ntfs_cluster_to_bytes(vol, rl->length - (vcn - rl->vcn));
 
 	if (rl_length == 0 && rl->lcn > LCN_DELALLOC) {
 		ntfs_error(inode->i_sb,
@@ -364,11 +409,13 @@ static int ntfs_read_iomap_begin_non_resident(struct inode *inode, loff_t offset
 }
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
-static int ntfs_read_iomap_begin(struct inode *inode, loff_t offset, loff_t length,
-		unsigned int flags, struct iomap *iomap, struct iomap *srcmap)
+static int __ntfs_read_iomap_begin(struct inode *inode, loff_t offset, loff_t length,
+		unsigned int flags, struct iomap *iomap, struct iomap *srcmap,
+		bool need_unwritten)
 #else
 static int __ntfs_read_iomap_begin(struct inode *inode, loff_t offset, loff_t length,
-		unsigned int flags, struct iomap *iomap, struct iomap *srcmap, bool for_clu_zero)
+		unsigned int flags, struct iomap *iomap, struct iomap *srcmap,
+		bool for_clu_zero, bool need_unwritten)
 #endif
 {
 	struct ntfs_inode *ni = NTFS_I(inode);
@@ -377,14 +424,15 @@ static int __ntfs_read_iomap_begin(struct inode *inode, loff_t offset, loff_t le
 	if (NInoNonResident(ni))
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 17, 0)
 		ret = ntfs_read_iomap_begin_non_resident(inode, offset, length,
-				flags, iomap, for_clu_zero);
+				flags, iomap, for_clu_zero, need_unwritten);
 #else
 		ret = ntfs_read_iomap_begin_non_resident(inode, offset, length,
-				flags, iomap);
+				flags, iomap, need_unwritten);
 #endif
 
 	else
-		ret = ntfs_read_iomap_begin_resident(inode, offset, flags, iomap);
+		ret = ntfs_read_iomap_begin_resident(inode, offset, length,
+				flags, iomap);
 
 	return ret;
 }
@@ -407,8 +455,23 @@ static int ntfs_zero_read_iomap_end(struct inode *inode, loff_t pos, loff_t leng
 }
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
-const struct iomap_ops ntfs_zero_read_iomap_ops = {
-	.iomap_begin = ntfs_read_iomap_begin,
+static int ntfs_read_iomap_begin(struct inode *inode, loff_t offset, loff_t length,
+		unsigned int flags, struct iomap *iomap, struct iomap *srcmap)
+{
+	return __ntfs_read_iomap_begin(inode, offset, length, flags, iomap,
+			srcmap, true);
+}
+
+static int ntfs_seek_iomap_begin(struct inode *inode, loff_t offset, loff_t length,
+		unsigned int flags, struct iomap *iomap, struct iomap *srcmap)
+{
+	return __ntfs_read_iomap_begin(inode, offset, length, flags, iomap,
+			srcmap, false);
+}
+
+
+static const struct iomap_ops ntfs_zero_read_iomap_ops = {
+	.iomap_begin = ntfs_seek_iomap_begin,
 	.iomap_end = ntfs_zero_read_iomap_end,
 };
 #else
@@ -416,16 +479,25 @@ const struct iomap_ops ntfs_zero_read_iomap_ops = {
 static int ntfs_zero_read_iomap_begin(struct inode *inode, loff_t offset, loff_t length,
 		unsigned int flags, struct iomap *iomap, struct iomap *srcmap)
 {
-	return __ntfs_read_iomap_begin(inode, offset, length, flags, iomap, srcmap, true);
+	return __ntfs_read_iomap_begin(inode, offset, length, flags, iomap, srcmap,
+				       true, false);
 }
 
 static int ntfs_read_iomap_begin(struct inode *inode, loff_t offset, loff_t length,
 		unsigned int flags, struct iomap *iomap, struct iomap *srcmap)
 {
-	return __ntfs_read_iomap_begin(inode, offset, length, flags, iomap, srcmap, false);
+	return __ntfs_read_iomap_begin(inode, offset, length, flags, iomap, srcmap,
+				       false, true);
 }
 
-const struct iomap_ops ntfs_zero_read_iomap_ops = {
+static int ntfs_seek_iomap_begin(struct inode *inode, loff_t offset, loff_t length,
+		unsigned int flags, struct iomap *iomap, struct iomap *srcmap)
+{
+	return __ntfs_read_iomap_begin(inode, offset, length, flags, iomap, srcmap,
+				       false, false);
+}
+
+static const struct iomap_ops ntfs_zero_read_iomap_ops = {
 	.iomap_begin = ntfs_zero_read_iomap_begin,
 	.iomap_end = ntfs_zero_read_iomap_end,
 };
@@ -434,6 +506,11 @@ const struct iomap_ops ntfs_zero_read_iomap_ops = {
 
 const struct iomap_ops ntfs_read_iomap_ops = {
 	.iomap_begin = ntfs_read_iomap_begin,
+	.iomap_end = ntfs_read_iomap_end,
+};
+
+const struct iomap_ops ntfs_seek_iomap_ops = {
+	.iomap_begin = ntfs_seek_iomap_begin,
 	.iomap_end = ntfs_read_iomap_end,
 };
 
@@ -484,10 +561,10 @@ static int ntfs_write_iomap_begin_non_resident(struct inode *inode, loff_t offse
 	int err;
 	s64 vcn, lcn;
 	s64 max_clu_count =
-		NTFS_B_TO_CLU(vol, round_up(length, vol->cluster_size));
+		ntfs_bytes_to_cluster(vol, round_up(length, vol->cluster_size));
 
-	vcn = NTFS_B_TO_CLU(vol, offset);
-	vcn_ofs = NTFS_B_TO_CLU_OFS(vol, offset);
+	vcn = ntfs_bytes_to_cluster(vol, offset);
+	vcn_ofs = ntfs_bytes_to_cluster_off(vol, offset);
 
 	down_read(&ni->runlist.lock);
 	rl = ni->runlist.rl;
@@ -553,7 +630,8 @@ remap_rl:
 		if (lcn <= LCN_HOLE) {
 			size_t new_rl_count;
 
-			rlc = ntfs_malloc_nofs(sizeof(struct runlist_element) * 2);
+			rlc = kmalloc(sizeof(struct runlist_element) * 2,
+					GFP_NOFS);
 			if (!rlc) {
 				up_write(&ni->runlist.lock);
 				mutex_unlock(&ni->mrec_lock);
@@ -574,7 +652,7 @@ remap_rl:
 				ntfs_error(vol->sb, "Failed to merge runlists");
 				up_write(&ni->runlist.lock);
 				mutex_unlock(&ni->mrec_lock);
-				ntfs_free(rlc);
+				kvfree(rlc);
 				return PTR_ERR(rl);
 			}
 
@@ -588,7 +666,7 @@ remap_rl:
 		if (lcn < LCN_DELALLOC)
 			ntfs_hold_dirty_clusters(vol, max_clu_count);
 
-		rl_length = NTFS_CLU_TO_B(vol, max_clu_count);
+		rl_length = ntfs_cluster_to_bytes(vol, max_clu_count);
 		if (length > rl_length - vcn_ofs)
 			iomap->length = rl_length - vcn_ofs;
 		else
@@ -640,9 +718,9 @@ remap_rl:
 		mutex_unlock(&ni->mrec_lock);
 
 		iomap->type = IOMAP_MAPPED;
-		iomap->addr = NTFS_CLU_TO_B(vol, lcn) + vcn_ofs;
+		iomap->addr = ntfs_cluster_to_bytes(vol, lcn) + vcn_ofs;
 
-		rl_length = NTFS_CLU_TO_B(vol, max_clu_count);
+		rl_length = ntfs_cluster_to_bytes(vol, max_clu_count);
 		if (length > rl_length - vcn_ofs)
 			iomap->length = rl_length - vcn_ofs;
 		else
@@ -660,8 +738,14 @@ remap_rl:
 	return 0;
 }
 
-static int ntfs_write_da_iomap_begin_non_resident(struct inode *inode, loff_t offset,
-		loff_t length, unsigned int flags, struct iomap *iomap, bool mapped)
+#define NTFS_IOMAP_FLAGS_BEGIN		BIT(1)
+#define NTFS_IOMAP_FLAGS_DIO		BIT(2)
+#define	NTFS_IOMAP_FLAGS_MKWRITE	BIT(3)
+#define	NTFS_IOMAP_FLAGS_WRITEBACK	BIT(4)
+
+static int ntfs_write_da_iomap_begin_non_resident(struct inode *inode,
+		loff_t offset, loff_t length, unsigned int flags,
+		struct iomap *iomap, int ntfs_iomap_flags)
 {
 	struct ntfs_inode *ni = NTFS_I(inode);
 	struct ntfs_volume *vol = ni->vol;
@@ -670,17 +754,17 @@ static int ntfs_write_da_iomap_begin_non_resident(struct inode *inode, loff_t of
 	bool balloc = false, update_mp;
 	int err;
 	s64 max_clu_count =
-		NTFS_B_TO_CLU(vol, round_up(length, vol->cluster_size));
+		ntfs_bytes_to_cluster(vol, round_up(length, vol->cluster_size));
 
-	vcn = NTFS_B_TO_CLU(vol, offset);
-	vcn_ofs = NTFS_B_TO_CLU_OFS(vol, offset);
+	vcn = ntfs_bytes_to_cluster(vol, offset);
+	vcn_ofs = ntfs_bytes_to_cluster_off(vol, offset);
 
-	update_mp = (flags & IOMAP_DIRECT) || mapped ||
-		NInoAttr(ni) || ni->mft_no < FILE_first_user;
+	update_mp = ntfs_iomap_flags & (NTFS_IOMAP_FLAGS_DIO | NTFS_IOMAP_FLAGS_MKWRITE) ||
+			NInoAttr(ni) || ni->mft_no < FILE_first_user;
 	down_write(&ni->runlist.lock);
 	err = ntfs_attr_map_cluster(ni, vcn, &start_lcn, &lcn_count,
 			max_clu_count, &balloc, update_mp,
-			!(flags & IOMAP_DIRECT) && !mapped);
+			ntfs_iomap_flags & NTFS_IOMAP_FLAGS_WRITEBACK);
 	up_write(&ni->runlist.lock);
 	mutex_unlock(&ni->mrec_lock);
 	if (err) {
@@ -691,7 +775,7 @@ static int ntfs_write_da_iomap_begin_non_resident(struct inode *inode, loff_t of
 	iomap->bdev = inode->i_sb->s_bdev;
 	iomap->offset = offset;
 
-	rl_length = NTFS_CLU_TO_B(vol, lcn_count);
+	rl_length = ntfs_cluster_to_bytes(vol, lcn_count);
 	if (length > rl_length - vcn_ofs)
 		iomap->length = rl_length - vcn_ofs;
 	else
@@ -704,22 +788,23 @@ static int ntfs_write_da_iomap_begin_non_resident(struct inode *inode, loff_t of
 	if (balloc == true)
 		iomap->flags = IOMAP_F_NEW;
 
-	iomap->addr = NTFS_CLU_TO_B(vol, start_lcn) + vcn_ofs;
+	iomap->addr = ntfs_cluster_to_bytes(vol, start_lcn) + vcn_ofs;
 
 	if (balloc == true) {
-		if (flags & IOMAP_DIRECT || mapped == true) {
+		if (flags & IOMAP_DIRECT ||
+		    ntfs_iomap_flags & NTFS_IOMAP_FLAGS_MKWRITE) {
 			loff_t end = offset + length;
 
 			if (vcn_ofs || ((vol->cluster_size > iomap->length) &&
-						end < ni->initialized_size))
+					end < ni->initialized_size))
 				err = ntfs_zero_range(inode,
 						      start_lcn <<
 						      vol->cluster_size_bits,
 						      vol->cluster_size,
 						      true);
 			if (!err && lcn_count > 1 &&
-					(iomap->length & vol->cluster_size_mask &&
-					 end < ni->initialized_size))
+			    (iomap->length & vol->cluster_size_mask &&
+			     end < ni->initialized_size))
 				err = ntfs_zero_range(inode,
 						      (start_lcn + lcn_count - 1) <<
 						      vol->cluster_size_bits,
@@ -735,8 +820,8 @@ static int ntfs_write_da_iomap_begin_non_resident(struct inode *inode, loff_t of
 			return err;
 	}
 
-	if (mapped && iomap->offset + iomap->length >
-			ni->initialized_size) {
+	if (ntfs_iomap_flags & NTFS_IOMAP_FLAGS_MKWRITE &&
+	    iomap->offset + iomap->length > ni->initialized_size) {
 		err = ntfs_attr_set_initialized_size(ni, iomap->offset +
 				iomap->length);
 	}
@@ -793,24 +878,54 @@ out:
 
 static int __ntfs_write_iomap_begin(struct inode *inode, loff_t offset,
 				    loff_t length, unsigned int flags,
-				    struct iomap *iomap, bool da, bool mapped)
+				    struct iomap *iomap, int ntfs_iomap_flags)
 {
 	struct ntfs_inode *ni = NTFS_I(inode);
+	loff_t end = offset + length;
 	int ret;
 
 	if (NVolShutdown(ni->vol))
 		return -EIO;
 
-	mutex_lock(&ni->mrec_lock);
-	if (NInoNonResident(ni)) {
-		if (da)
-			ret = ntfs_write_da_iomap_begin_non_resident(inode,
-					offset, length, flags, iomap, mapped);
+	if (ntfs_iomap_flags & (NTFS_IOMAP_FLAGS_BEGIN | NTFS_IOMAP_FLAGS_DIO) &&
+	    end > ni->data_size) {
+		struct ntfs_volume *vol = ni->vol;
+
+		mutex_lock(&ni->mrec_lock);
+		if (end > ni->allocated_size &&
+		    end < ni->allocated_size + vol->preallocated_size)
+			ret = ntfs_attr_expand(ni, end,
+					ni->allocated_size + vol->preallocated_size);
 		else
+			ret = ntfs_attr_expand(ni, end, 0);
+		mutex_unlock(&ni->mrec_lock);
+		if (ret)
+			return ret;
+	}
+
+	if (NInoNonResident(ni)) {
+		if (ntfs_iomap_flags & (NTFS_IOMAP_FLAGS_BEGIN | NTFS_IOMAP_FLAGS_DIO) &&
+		    end > ni->initialized_size) {
+			ret = ntfs_extend_initialized_size(inode, offset, end,
+							   ntfs_iomap_flags &
+							   NTFS_IOMAP_FLAGS_DIO);
+			if (ret < 0)
+				return ret;
+		}
+
+		mutex_lock(&ni->mrec_lock);
+		if (ntfs_iomap_flags & NTFS_IOMAP_FLAGS_BEGIN)
 			ret = ntfs_write_iomap_begin_non_resident(inode, offset,
 					length, iomap);
-	} else
+		else
+			ret = ntfs_write_da_iomap_begin_non_resident(inode,
+					offset, length, flags, iomap,
+					ntfs_iomap_flags);
+	} else {
+		mutex_lock(&ni->mrec_lock);
 		ret = ntfs_write_iomap_begin_resident(inode, offset, iomap);
+	}
+
 	return ret;
 }
 
@@ -819,7 +934,7 @@ static int ntfs_write_iomap_begin(struct inode *inode, loff_t offset,
 				  struct iomap *iomap, struct iomap *srcmap)
 {
 	return __ntfs_write_iomap_begin(inode, offset, length, flags, iomap,
-			false, false);
+			NTFS_IOMAP_FLAGS_BEGIN);
 }
 
 static int ntfs_write_iomap_end(struct inode *inode, loff_t pos, loff_t length,
@@ -877,7 +992,7 @@ static int ntfs_page_mkwrite_iomap_begin(struct inode *inode, loff_t offset,
 				  struct iomap *iomap, struct iomap *srcmap)
 {
 	return __ntfs_write_iomap_begin(inode, offset, length, flags, iomap,
-			true, true);
+			NTFS_IOMAP_FLAGS_MKWRITE);
 }
 
 const struct iomap_ops ntfs_page_mkwrite_iomap_ops = {
@@ -890,7 +1005,7 @@ static int ntfs_dio_iomap_begin(struct inode *inode, loff_t offset,
 				  struct iomap *iomap, struct iomap *srcmap)
 {
 	return __ntfs_write_iomap_begin(inode, offset, length, flags, iomap,
-			true, false);
+			NTFS_IOMAP_FLAGS_DIO);
 }
 
 const struct iomap_ops ntfs_dio_iomap_ops = {
@@ -908,7 +1023,8 @@ static ssize_t ntfs_writeback_range(struct iomap_writepage_ctx *wpc,
 
 		error = __ntfs_write_iomap_begin(wpc->inode, offset,
 				NTFS_I(wpc->inode)->allocated_size - offset,
-				IOMAP_WRITE, &wpc->iomap, true, false);
+				IOMAP_WRITE, &wpc->iomap,
+				NTFS_IOMAP_FLAGS_WRITEBACK);
 		if (error)
 			return error;
 	}
@@ -940,7 +1056,8 @@ static int ntfs_write_map_blocks(struct iomap_writepage_ctx *wpc,
 #else
 					NTFS_I(inode)->data_size - offset,
 #endif
-					IOMAP_WRITE, &wpc->iomap, true, false);
+					IOMAP_WRITE, &wpc->iomap,
+					NTFS_IOMAP_FLAGS_WRITEBACK);
 }
 
 const struct iomap_writeback_ops ntfs_writeback_ops = {

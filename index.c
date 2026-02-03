@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 /*
- * NTFS kernel index handling. Part of the Linux-NTFS project.
+ * NTFS kernel index handling.
  *
  * Copyright (c) 2004-2005 Anton Altaparmakov
  * Copyright (c) 2025 LG Electronics Co., Ltd.
  *
- * Part of this file is based on code from the NTFS-3G project.
+ * Part of this file is based on code from the NTFS-3G.
  * and is copyrighted by the respective authors below:
  * Copyright (c) 2004-2005 Anton Altaparmakov
  * Copyright (c) 2004-2005 Richard Russon
@@ -17,7 +17,6 @@
 #include "collate.h"
 #include "index.h"
 #include "ntfs.h"
-#include "malloc.h"
 #include "attrlist.h"
 
 /*
@@ -54,9 +53,9 @@ int ntfs_index_entry_inconsistent(struct ntfs_index_context *icx,
 		ie_end = (u8 *)ih + le32_to_cpu(ih->index_length);
 
 		if (ie_start > (u8 *)ie ||
-		    ie_end <= ((u8 *)ie + ie->length) ||
-		    ie->length > le32_to_cpu(ih->allocated_size) ||
-		    ie->length > icx->block_size) {
+		    ie_end <= (u8 *)ie + le16_to_cpu(ie->length) ||
+		    le16_to_cpu(ie->length) > le32_to_cpu(ih->allocated_size) ||
+		    le16_to_cpu(ie->length) > icx->block_size) {
 			ntfs_error(vol->sb, "Index entry(0x%p) is out of range from %s",
 					(u8 *)icx->entry,
 					icx->is_in_root ? "index root" : "index block");
@@ -97,7 +96,7 @@ int ntfs_index_entry_inconsistent(struct ntfs_index_context *icx,
 	return 0;
 }
 
-/**
+/*
  * ntfs_index_entry_mark_dirty - mark an index entry dirty
  * @ictx:	ntfs index context describing the index entry
  *
@@ -175,7 +174,7 @@ int ntfs_icx_ib_sync_write(struct ntfs_index_context *icx)
 
 	ret = ntfs_ib_write(icx, icx->ib);
 	if (!ret) {
-		ntfs_free(icx->ib);
+		kvfree(icx->ib);
 		icx->ib = NULL;
 		icx->ib_dirty = false;
 	} else {
@@ -186,7 +185,7 @@ int ntfs_icx_ib_sync_write(struct ntfs_index_context *icx)
 	return ret;
 }
 
-/**
+/*
  * ntfs_index_ctx_get - allocate and initialize a new index context
  * @ni:		ntfs inode with which to initialize the context
  * @name:	name of the which context describes
@@ -230,7 +229,7 @@ static void ntfs_index_ctx_free(struct ntfs_index_context *icx)
 	if (!icx->is_in_root) {
 		if (icx->ib_dirty)
 			ntfs_ib_write(icx, icx->ib);
-		ntfs_free(icx->ib);
+		kvfree(icx->ib);
 		icx->ib = NULL;
 	}
 
@@ -240,7 +239,7 @@ static void ntfs_index_ctx_free(struct ntfs_index_context *icx)
 	}
 }
 
-/**
+/*
  * ntfs_index_ctx_put - release an index context
  * @icx:	index context to free
  *
@@ -252,7 +251,7 @@ void ntfs_index_ctx_put(struct ntfs_index_context *icx)
 	kmem_cache_free(ntfs_index_ctx_cache, icx);
 }
 
-/**
+/*
  * ntfs_index_ctx_reinit - reinitialize an index context
  * @icx:	index context to reinitialize
  *
@@ -276,7 +275,7 @@ static __le64 *ntfs_ie_get_vcn_addr(struct index_entry *ie)
 	return (__le64 *)((u8 *)ie + le16_to_cpu(ie->length) - sizeof(s64));
 }
 
-/**
+/*
  *  Get the subnode vcn to which the index entry refers.
  */
 static s64 ntfs_ie_get_vcn(struct index_entry *ie)
@@ -304,7 +303,7 @@ static int ntfs_ie_end(struct index_entry *ie)
 	return ie->flags & INDEX_ENTRY_END || !ie->length;
 }
 
-/**
+/*
  *  Find the last entry in the index block
  */
 static struct index_entry *ntfs_ie_get_last(struct index_entry *ie, char *ies_end)
@@ -390,7 +389,7 @@ static void ntfs_ie_set_vcn(struct index_entry *ie, s64 vcn)
 	*ntfs_ie_get_vcn_addr(ie) = cpu_to_le64(vcn);
 }
 
-/**
+/*
  *  Insert @ie index entry at @pos entry. Used @ih values should be ok already.
  */
 static void ntfs_ie_insert(struct index_header *ih, struct index_entry *ie,
@@ -408,15 +407,9 @@ static void ntfs_ie_insert(struct index_header *ih, struct index_entry *ie,
 
 static struct index_entry *ntfs_ie_dup(struct index_entry *ie)
 {
-	struct index_entry *dup;
-
 	ntfs_debug("Entering\n");
 
-	dup = ntfs_malloc_nofs(le16_to_cpu(ie->length));
-	if (dup)
-		memcpy(dup, ie, le16_to_cpu(ie->length));
-
-	return dup;
+	return kmemdup(ie, le16_to_cpu(ie->length), GFP_NOFS);
 }
 
 static struct index_entry *ntfs_ie_dup_novcn(struct index_entry *ie)
@@ -429,9 +422,8 @@ static struct index_entry *ntfs_ie_dup_novcn(struct index_entry *ie)
 	if (ie->flags & INDEX_ENTRY_NODE)
 		size -= sizeof(s64);
 
-	dup = ntfs_malloc_nofs(size);
+	dup = kmemdup(ie, size, GFP_NOFS);
 	if (dup) {
-		memcpy(dup, ie, size);
 		dup->flags &= ~INDEX_ENTRY_NODE;
 		dup->length = cpu_to_le16(size);
 	}
@@ -555,10 +547,10 @@ static struct index_root *ntfs_ir_lookup2(struct ntfs_inode *ni, __le16 *name, u
 	return ir;
 }
 
-/**
+/*
  * Find a key in the index block.
  */
-static int ntfs_ie_lookup(const void *key, const int key_len,
+static int ntfs_ie_lookup(const void *key, const u32 key_len,
 		struct ntfs_index_context *icx, struct index_header *ih,
 		s64 *vcn, struct index_entry **ie_out)
 {
@@ -597,7 +589,7 @@ static int ntfs_ie_lookup(const void *key, const int key_len,
 		 */
 		rc = ntfs_collate(icx->idx_ni->vol, icx->cr, key, key_len, &ie->key,
 				le16_to_cpu(ie->key_length));
-		if (rc == -2) {
+		if (rc == -EINVAL) {
 			ntfs_error(icx->idx_ni->vol->sb,
 				"Collation error. Perhaps a filename contains invalid characters?\n");
 			return -ERANGE;
@@ -703,7 +695,7 @@ static int ntfs_icx_parent_dec(struct ntfs_index_context *icx)
 	return 0;
 }
 
-/**
+/*
  * ntfs_index_lookup - find a key in an index and return its index entry
  * @key:	key for which to search in the index
  * @key_len:	length of @key in bytes
@@ -732,7 +724,7 @@ static int ntfs_icx_parent_dec(struct ntfs_index_context *icx)
  * the call to ntfs_index_ctx_put() to ensure that the changes are written
  * to disk.
  */
-int ntfs_index_lookup(const void *key, const int key_len, struct ntfs_index_context *icx)
+int ntfs_index_lookup(const void *key, const u32 key_len, struct ntfs_index_context *icx)
 {
 	s64 old_vcn, vcn;
 	struct ntfs_inode *ni = icx->idx_ni;
@@ -744,7 +736,7 @@ int ntfs_index_lookup(const void *key, const int key_len, struct ntfs_index_cont
 
 	ntfs_debug("Entering\n");
 
-	if (!key || key_len <= 0) {
+	if (!key) {
 		ntfs_error(sb, "key: %p  key_len: %d", key, key_len);
 		return -EINVAL;
 	}
@@ -794,7 +786,7 @@ int ntfs_index_lookup(const void *key, const int key_len, struct ntfs_index_cont
 		goto err_out;
 	}
 
-	ib = ntfs_malloc_nofs(icx->block_size);
+	ib = kvzalloc(icx->block_size, GFP_NOFS);
 	if (!ib) {
 		err = -ENOMEM;
 		goto err_out;
@@ -838,7 +830,7 @@ err_out:
 		ntfs_attr_put_search_ctx(icx->actx);
 		icx->actx = NULL;
 	}
-	ntfs_free(ib);
+	kvfree(ib);
 	if (!err)
 		err = -EIO;
 	return err;
@@ -859,7 +851,7 @@ static struct index_block *ntfs_ib_alloc(s64 ib_vcn, u32 ib_size,
 
 	ntfs_debug("Entering ib_vcn = %lld ib_size = %u\n", ib_vcn, ib_size);
 
-	ib = ntfs_malloc_nofs(ib_size);
+	ib = kvzalloc(ib_size, GFP_NOFS);
 	if (!ib)
 		return NULL;
 
@@ -880,7 +872,7 @@ static struct index_block *ntfs_ib_alloc(s64 ib_vcn, u32 ib_size,
 	return ib;
 }
 
-/**
+/*
  *  Find the median by going through all the entries
  */
 static struct index_entry *ntfs_ie_get_median(struct index_header *ih)
@@ -1040,7 +1032,7 @@ out:
 	if (ntfs_ibm_set(icx, vcn))
 		vcn = (s64)-1;
 
-	ntfs_free(bm);
+	kvfree(bm);
 	return vcn;
 }
 
@@ -1118,7 +1110,7 @@ static int ntfs_ib_copy_tail(struct ntfs_index_context *icx, struct index_block 
 			le32_to_cpu(dst->index.entries_offset));
 	ret = ntfs_ib_write(icx, dst);
 
-	ntfs_free(dst);
+	kvfree(dst);
 	return ret;
 }
 
@@ -1274,7 +1266,7 @@ retry:
 	ntfs_ie_set_vcn(ie, new_ib_vcn);
 
 err_out:
-	ntfs_free(ib);
+	kvfree(ib);
 	if (ctx)
 		ntfs_attr_put_search_ctx(ctx);
 out:
@@ -1284,8 +1276,10 @@ clear_bmp:
 	goto err_out;
 }
 
-/**
+/*
  * ntfs_ir_truncate - Truncate index root attribute
+ * @icx: index context
+ * @data_size: new data size for the index root
  */
 static int ntfs_ir_truncate(struct ntfs_index_context *icx, int data_size)
 {
@@ -1311,8 +1305,10 @@ static int ntfs_ir_truncate(struct ntfs_index_context *icx, int data_size)
 	return ret;
 }
 
-/**
+/*
  * ntfs_ir_make_space - Make more space for the index root attribute
+ * @icx: index context
+ * @data_size: required data size for the index root
  */
 static int ntfs_ir_make_space(struct ntfs_index_context *icx, int data_size)
 {
@@ -1340,8 +1336,7 @@ static int ntfs_ie_add_vcn(struct index_entry **ie)
 	struct index_entry *p, *old = *ie;
 
 	old->length = cpu_to_le16(le16_to_cpu(old->length) + sizeof(s64));
-	p = ntfs_realloc_nofs(old, le16_to_cpu(old->length),
-			le16_to_cpu(old->length) - sizeof(s64));
+	p = krealloc(old, le16_to_cpu(old->length), GFP_NOFS);
 	if (!p)
 		return -ENOMEM;
 
@@ -1375,7 +1370,7 @@ static int ntfs_ih_insert(struct index_header *ih, struct index_entry *orig_ie, 
 	ntfs_ie_insert(ih, ie, ie_node);
 	ntfs_ie_set_vcn(ie_node, old_vcn);
 out:
-	ntfs_free(ie);
+	kfree(ie);
 	return ret;
 }
 
@@ -1436,7 +1431,7 @@ static int ntfs_ib_insert(struct ntfs_index_context *icx, struct index_entry *ie
 
 	ntfs_debug("Entering\n");
 
-	ib = ntfs_malloc_nofs(icx->block_size);
+	ib = kvzalloc(icx->block_size, GFP_NOFS);
 	if (!ib)
 		return -ENOMEM;
 
@@ -1461,12 +1456,14 @@ static int ntfs_ib_insert(struct ntfs_index_context *icx, struct index_entry *ie
 	err = ntfs_ib_write(icx, ib);
 
 err_out:
-	ntfs_free(ib);
+	kvfree(ib);
 	return err;
 }
 
-/**
+/*
  * ntfs_ib_split - Split an index block
+ * @icx: index context
+ * @ib: index block to split
  */
 static int ntfs_ib_split(struct ntfs_index_context *icx, struct index_block *ib)
 {
@@ -1516,7 +1513,7 @@ resplit:
 			ib = si->ib;
 			goto resplit;
 		} else if (ret) {
-			ntfs_free(si->ib);
+			kvfree(si->ib);
 			kfree(si);
 			ntfs_ibm_clear(icx, new_vcn);
 			goto out;
@@ -1530,7 +1527,7 @@ out:
 	while (!list_empty(&ntfs_cut_tail_list)) {
 		si = list_last_entry(&ntfs_cut_tail_list, struct split_info, entry);
 		ntfs_ibm_clear(icx, si->new_vcn);
-		ntfs_free(si->ib);
+		kvfree(si->ib);
 		list_del(&si->entry);
 		kfree(si);
 		if (!ret)
@@ -1592,7 +1589,7 @@ err_out:
 	return ret;
 }
 
-/**
+/*
  * ntfs_index_add_filename - add filename to directory index
  * @ni:		ntfs inode describing directory to which index add filename
  * @fn:		FILE_NAME attribute to add
@@ -1613,7 +1610,7 @@ int ntfs_index_add_filename(struct ntfs_inode *ni, struct file_name_attr *fn, u6
 		sizeof(struct file_name_attr);
 	ie_size = (sizeof(struct index_entry_header) + fn_size + 7) & ~7;
 
-	ie = ntfs_malloc_nofs(ie_size);
+	ie = kzalloc(ie_size, GFP_NOFS);
 	if (!ie)
 		return -ENOMEM;
 
@@ -1637,7 +1634,7 @@ int ntfs_index_add_filename(struct ntfs_inode *ni, struct file_name_attr *fn, u6
 	err = ntfs_ie_add(icx, ie);
 	ntfs_index_ctx_put(icx);
 out:
-	ntfs_free(ie);
+	kfree(ie);
 	return err;
 }
 
@@ -1681,11 +1678,11 @@ static int ntfs_ih_takeout(struct ntfs_index_context *icx, struct index_header *
 
 	ret = ntfs_ie_add(icx, ie_roam);
 out:
-	ntfs_free(ie_roam);
+	kfree(ie_roam);
 	return ret;
 }
 
-/**
+/*
  *  Used if an empty index block to be deleted has END entry as the parent
  *  in the INDEX_ROOT which is the only one there.
  */
@@ -1707,7 +1704,7 @@ static void ntfs_ir_leafify(struct ntfs_index_context *icx, struct index_header 
 	ntfs_ir_truncate(icx, le32_to_cpu(ih->index_length));
 }
 
-/**
+/*
  *  Used if an empty index block to be deleted has END entry as the parent
  *  in the INDEX_ROOT which is not the only one there.
  */
@@ -1747,7 +1744,7 @@ static int ntfs_index_rm_leaf(struct ntfs_index_context *icx)
 	if (ntfs_icx_parent_vcn(icx) == VCN_INDEX_ROOT_PARENT)
 		parent_ih = &icx->ir->index;
 	else {
-		ib = ntfs_malloc_nofs(icx->block_size);
+		ib = kvzalloc(icx->block_size, GFP_NOFS);
 		if (!ib)
 			return -ENOMEM;
 
@@ -1776,7 +1773,7 @@ static int ntfs_index_rm_leaf(struct ntfs_index_context *icx)
 
 	ret = ntfs_ih_reparent_end(icx, parent_ih, ib);
 out:
-	ntfs_free(ib);
+	kvfree(ib);
 	return ret;
 }
 
@@ -1798,7 +1795,7 @@ static int ntfs_index_rm_node(struct ntfs_index_context *icx)
 			return -EINVAL;
 	}
 
-	ib = ntfs_malloc_nofs(icx->block_size);
+	ib = kvzalloc(icx->block_size, GFP_NOFS);
 	if (!ib)
 		return -ENOMEM;
 
@@ -1884,13 +1881,13 @@ descend:
 		ret = ntfs_ib_write(icx, ib);
 
 out2:
-	ntfs_free(ie);
+	kfree(ie);
 out:
-	ntfs_free(ib);
+	kvfree(ib);
 	return ret;
 }
 
-/**
+/*
  * ntfs_index_rm - remove entry from the index
  * @icx:	index context describing entry to delete
  *
@@ -1938,7 +1935,7 @@ err_out:
 	return ret;
 }
 
-int ntfs_index_remove(struct ntfs_inode *dir_ni, const void *key, const int keylen)
+int ntfs_index_remove(struct ntfs_inode *dir_ni, const void *key, const u32 keylen)
 {
 	int ret = 0;
 	struct ntfs_index_context *icx;
@@ -1988,7 +1985,7 @@ struct index_entry *ntfs_index_walk_down(struct index_entry *ie, struct ntfs_ind
 		if (ictx->is_in_root) {
 			/* down from level zero */
 			ictx->ir = NULL;
-			ictx->ib = (struct index_block *)ntfs_malloc_nofs(ictx->block_size);
+			ictx->ib = kvzalloc(ictx->block_size, GFP_NOFS);
 			ictx->pindex = 1;
 			ictx->is_in_root = false;
 		} else {
@@ -2008,10 +2005,12 @@ struct index_entry *ntfs_index_walk_down(struct index_entry *ie, struct ntfs_ind
 	return entry;
 }
 
-/**
+/*
  * ntfs_index_walk_up - walk up the index tree (root bound) until
  * there is a valid data entry in parent returns the parent entry
  * or NULL if no more parent.
+ * @ie: current index entry
+ * @ictx: index context
  */
 static struct index_entry *ntfs_index_walk_up(struct index_entry *ie,
 		struct ntfs_index_context *ictx)
@@ -2056,7 +2055,7 @@ static struct index_entry *ntfs_index_walk_up(struct index_entry *ie,
 	return entry;
 }
 
-/**
+/*
  * ntfs_index_next - get next entry in an index according to collating sequence.
  * Returns next entry or NULL if none.
  *
@@ -2079,6 +2078,9 @@ static struct index_entry *ntfs_index_walk_up(struct index_entry *ie,
  *     +---+---+---+---+---+---+---+---+
  *     | 18| 19| 20| 21| 22| 23| 24|   |
  *     +---+---+---+---+---+---+---+---+
+ *
+ * @ie: current index entry
+ * @ictx: index context
  */
 struct index_entry *ntfs_index_next(struct index_entry *ie, struct ntfs_index_context *ictx)
 {

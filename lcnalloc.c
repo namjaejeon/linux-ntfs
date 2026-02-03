@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 /*
- * Cluster (de)allocation code. Part of the Linux-NTFS project.
+ * Cluster (de)allocation code.
  *
  * Copyright (c) 2004-2005 Anton Altaparmakov
  * Copyright (c) 2025 LG Electronics Co., Ltd.
  *
- * Part of this file is based on code from the NTFS-3G project.
+ * Part of this file is based on code from the NTFS-3G.
  * and is copyrighted by the respective authors below:
  * Copyright (c) 2002-2004 Anton Altaparmakov
  * Copyright (c) 2004 Yura Pakhuchiy
@@ -15,11 +15,10 @@
 
 #include "lcnalloc.h"
 #include "bitmap.h"
-#include "malloc.h"
 #include "aops.h"
 #include "ntfs.h"
 
-/**
+/*
  * ntfs_cluster_free_from_rl_nolock - free clusters from runlist
  * @vol:	mounted ntfs volume on which to free the clusters
  * @rl:		runlist describing the clusters to free
@@ -116,8 +115,16 @@ static s64 max_empty_bit_range(unsigned char *buf, int size)
 	return start_pos;
 }
 
-/**
+/*
  * ntfs_cluster_alloc - allocate clusters on an ntfs volume
+ * @vol:		mounted ntfs volume on which to allocate clusters
+ * @start_vcn:		vcn of the first allocated cluster
+ * @count:		number of clusters to allocate
+ * @start_lcn:		starting lcn at which to allocate the clusters or -1 if none
+ * @zone:		zone from which to allocate (MFT_ZONE or DATA_ZONE)
+ * @is_extension:	if true, the caller is extending an attribute
+ * @is_contig:		if true, require contiguous allocation
+ * @is_dealloc:		if true, the allocation is for deallocation purposes
  *
  * Allocate @count clusters preferably starting at cluster @start_lcn or at the
  * current allocator position if @start_lcn is -1, on the mounted ntfs volume
@@ -168,6 +175,9 @@ static s64 max_empty_bit_range(unsigned char *buf, int size)
  *	      on return.
  *	    - This function takes the volume lcn bitmap lock for writing and
  *	      modifies the bitmap contents.
+ *
+ * Return: Runlist describing the allocated cluster(s) on success, error pointer
+ *         on failure.
  */
 struct runlist_element *ntfs_cluster_alloc(struct ntfs_volume *vol, const s64 start_vcn,
 		const s64 count, const s64 start_lcn,
@@ -308,7 +318,6 @@ struct runlist_element *ntfs_cluster_alloc(struct ntfs_volume *vol, const s64 st
 		if (likely(folio)) {
 			if (need_writeback) {
 				ntfs_debug("Marking page dirty.");
-				flush_dcache_folio(folio);
 				folio_mark_dirty(folio);
 				need_writeback = 0;
 			}
@@ -321,7 +330,6 @@ struct runlist_element *ntfs_cluster_alloc(struct ntfs_volume *vol, const s64 st
 		if (likely(page)) {
 			if (need_writeback) {
 				ntfs_debug("Marking page dirty.");
-				flush_dcache_page(page);
 				set_page_dirty(page);
 				need_writeback = 0;
 			}
@@ -394,7 +402,7 @@ struct runlist_element *ntfs_cluster_alloc(struct ntfs_volume *vol, const s64 st
 			/*
 			 * Allocate more memory if needed, including space for
 			 * the terminator element.
-			 * ntfs_malloc_nofs() operates on whole pages only.
+			 * kvzalloc() operates on whole pages only.
 			 */
 			if ((rlpos + 2) * sizeof(*rl) > rlsize) {
 				struct runlist_element *rl2;
@@ -403,14 +411,14 @@ struct runlist_element *ntfs_cluster_alloc(struct ntfs_volume *vol, const s64 st
 				if (!rl)
 					ntfs_debug("First free bit is at s64 0x%llx.",
 							lcn + bmp_pos);
-				rl2 = ntfs_malloc_nofs(rlsize + (int)PAGE_SIZE);
+				rl2 = kvzalloc(rlsize + PAGE_SIZE, GFP_NOFS);
 				if (unlikely(!rl2)) {
 					err = -ENOMEM;
 					ntfs_error(vol->sb, "Failed to allocate memory.");
 					goto out;
 				}
 				memcpy(rl2, rl, rlsize);
-				ntfs_free(rl);
+				kvfree(rl);
 				rl = rl2;
 				rlsize += PAGE_SIZE;
 				ntfs_debug("Reallocated memory, rlsize 0x%x.",
@@ -746,7 +754,6 @@ out:
 	if (likely(folio && !IS_ERR(folio))) {
 		if (need_writeback) {
 			ntfs_debug("Marking page dirty.");
-			flush_dcache_folio(folio);
 			folio_mark_dirty(folio);
 			need_writeback = 0;
 		}
@@ -758,7 +765,6 @@ out:
 	if (likely(page && !IS_ERR(page))) {
 		if (need_writeback) {
 			ntfs_debug("Marking page dirty.");
-			flush_dcache_page(page);
 			set_page_dirty(page);
 			need_writeback = 0;
 		}
@@ -795,7 +801,7 @@ out:
 			NVolSetErrors(vol);
 		}
 		/* Free the runlist. */
-		ntfs_free(rl);
+		kvfree(rl);
 	} else if (err == -ENOSPC)
 		ntfs_debug("No space left at all, err = -ENOSPC, first free lcn = 0x%llx.",
 				vol->data1_zone_pos);
@@ -805,7 +811,7 @@ out:
 	return ERR_PTR(err);
 }
 
-/**
+/*
  * __ntfs_cluster_free - free clusters on an ntfs volume
  * @ni:		ntfs inode whose runlist describes the clusters to free
  * @start_vcn:	vcn in the runlist of @ni at which to start freeing clusters

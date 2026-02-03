@@ -1,7 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Exports for NTFS kernel cluster (de)allocation.
- * Part of the Linux-NTFS project.
  *
  * Copyright (c) 2004-2005 Anton Altaparmakov
  */
@@ -13,11 +12,19 @@
 
 #include "attrib.h"
 
+/*
+ * enum zone_type - Zone identifiers for cluster allocation policy
+ *
+ * FIRST_ZONE		For sanity checking.
+ * MFT_ZONE		Allocate from $MFT zone.
+ * DATA_ZONE		Allocate from $DATA zone.
+ * LAST_ZONE		For sanity checking.
+ */
 enum {
-	FIRST_ZONE	= 0,	/* For sanity checking. */
-	MFT_ZONE	= 0,	/* Allocate from $MFT zone. */
-	DATA_ZONE	= 1,	/* Allocate from $DATA zone. */
-	LAST_ZONE	= 1,	/* For sanity checking. */
+	FIRST_ZONE	= 0,
+	MFT_ZONE	= 0,
+	DATA_ZONE	= 1,
+	LAST_ZONE	= 1,
 };
 
 struct runlist_element *ntfs_cluster_alloc(struct ntfs_volume *vol,
@@ -29,7 +36,7 @@ struct runlist_element *ntfs_cluster_alloc(struct ntfs_volume *vol,
 s64 __ntfs_cluster_free(struct ntfs_inode *ni, const s64 start_vcn,
 		s64 count, struct ntfs_attr_search_ctx *ctx, const bool is_rollback);
 
-/**
+/*
  * ntfs_cluster_free - free clusters on an ntfs volume
  * @ni:		ntfs inode whose runlist describes the clusters to free
  * @start_vcn:	vcn in the runlist of @ni at which to start freeing clusters
@@ -94,7 +101,7 @@ static inline s64 ntfs_cluster_free(struct ntfs_inode *ni, const s64 start_vcn,
 int ntfs_cluster_free_from_rl_nolock(struct ntfs_volume *vol,
 		const struct runlist_element *rl);
 
-/**
+/*
  * ntfs_cluster_free_from_rl - free clusters from runlist
  * @vol:	mounted ntfs volume on which to free the clusters
  * @rl:		runlist describing the clusters to free

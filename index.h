@@ -1,7 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * Defines for NTFS kernel index handling.  Part of the Linux-NTFS
- * project.
+ * Defines for NTFS kernel index handling.
  *
  * Copyright (c) 2004 Anton Altaparmakov
  */
@@ -19,17 +18,28 @@
 
 #define MAX_PARENT_VCN	32
 
-/**
+/*
  * @idx_ni:	index inode containing the @entry described by this context
+ * @name:	Unicode name of the indexed attribute
+ *		(usually $I30 for directories)
+ * @name_len:	length of @name in Unicode characters
  * @entry:	index entry (points into @ir or @ia)
+ * @cr:		creation time of the entry (for sorting/validation)
  * @data:	index entry data (points into @entry)
  * @data_len:	length in bytes of @data
  * @is_in_root:	'true' if @entry is in @ir and 'false' if it is in @ia
  * @ir:		index root if @is_in_root and NULL otherwise
  * @actx:	attribute search context if @is_in_root and NULL otherwise
- * @base_ni:	base inode if @is_in_root and NULL otherwise
- * @ia:		index block if @is_in_root is 'false' and NULL otherwise
- * @page:	page if @is_in_root is 'false' and NULL otherwise
+ * @ib:		index block header (valid when @is_in_root is 'false')
+ * @ia_ni:	index allocation inode (extent inode) for @ia
+ * @parent_pos:	array of parent entry positions in the B-tree nodes
+ * @parent_vcn:	VCNs of parent index blocks in the B-tree traversal
+ * @pindex:	current depth (number of parent nodes) in the traversal
+ *		(maximum is MAX_PARENT_VCN)
+ * @ib_dirty:	true if the current index block (@ia/@ib) was modified
+ * @block_size:	size of index blocks in bytes (from $INDEX_ROOT or $Boot)
+ * @vcn_size_bits: log2(cluster size)
+ * @sync_write:	true if synchronous writeback is requested for this context
  *
  * @idx_ni is the index inode this context belongs to.
  *
@@ -54,8 +64,7 @@
  * When finished with the @entry and its @data, call ntfs_index_ctx_put() to
  * free the context and other associated resources.
  *
- * If the index entry was modified, call flush_dcache_index_entry_page()
- * immediately after the modification and either ntfs_index_entry_mark_dirty()
+ * If the index entry was modified, ntfs_index_entry_mark_dirty()
  * or ntfs_index_entry_write() before the call to ntfs_index_ctx_put() to
  * ensure that the changes are written to disk.
  */
@@ -71,13 +80,10 @@ struct ntfs_index_context {
 	struct index_root *ir;
 	struct ntfs_attr_search_ctx *actx;
 	struct index_block *ib;
-	struct ntfs_inode *base_ni;
-	struct index_block *ia;
-	struct page *page;
 	struct ntfs_inode *ia_ni;
-	int parent_pos[MAX_PARENT_VCN];  /* parent entries' positions */
-	s64 parent_vcn[MAX_PARENT_VCN]; /* entry's parent nodes */
-	int pindex;          /* maximum it's the number of the parent nodes  */
+	int parent_pos[MAX_PARENT_VCN];
+	s64 parent_vcn[MAX_PARENT_VCN];
+	int pindex;
 	bool ib_dirty;
 	u32 block_size;
 	u8 vcn_size_bits;
@@ -89,33 +95,12 @@ int ntfs_index_entry_inconsistent(struct ntfs_index_context *icx, struct ntfs_vo
 struct ntfs_index_context *ntfs_index_ctx_get(struct ntfs_inode *ni, __le16 *name,
 		u32 name_len);
 void ntfs_index_ctx_put(struct ntfs_index_context *ictx);
-int ntfs_index_lookup(const void *key, const int key_len,
+int ntfs_index_lookup(const void *key, const u32 key_len,
 		struct ntfs_index_context *ictx);
-
-/**
- * ntfs_index_entry_flush_dcache_page - flush_dcache_page() for index entries
- * @ictx:	ntfs index context describing the index entry
- *
- * Call flush_dcache_page() for the page in which an index entry resides.
- *
- * This must be called every time an index entry is modified, just after the
- * modification.
- *
- * If the index entry is in the index root attribute, simply flush the page
- * containing the mft record containing the index root attribute.
- *
- * If the index entry is in an index block belonging to the index allocation
- * attribute, simply flush the page cache page containing the index block.
- */
-static inline void ntfs_index_entry_flush_dcache_page(struct ntfs_index_context *ictx)
-{
-	if (!ictx->is_in_root)
-		flush_dcache_page(ictx->page);
-}
 
 void ntfs_index_entry_mark_dirty(struct ntfs_index_context *ictx);
 int ntfs_index_add_filename(struct ntfs_inode *ni, struct file_name_attr *fn, u64 mref);
-int ntfs_index_remove(struct ntfs_inode *ni, const void *key, const int keylen);
+int ntfs_index_remove(struct ntfs_inode *ni, const void *key, const u32 keylen);
 struct ntfs_inode *ntfs_ia_open(struct ntfs_index_context *icx, struct ntfs_inode *ni);
 struct index_entry *ntfs_index_walk_down(struct index_entry *ie, struct ntfs_index_context *ictx);
 struct index_entry *ntfs_index_next(struct index_entry *ie, struct ntfs_index_context *ictx);

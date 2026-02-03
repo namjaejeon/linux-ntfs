@@ -5,6 +5,7 @@ on:
     branches:
     - main
     - ntfs-next
+    - test-*
   pull_request:
     branches:
     - main

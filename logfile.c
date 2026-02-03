@@ -1,19 +1,16 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 /*
- * NTFS kernel journal handling. Part of the Linux-NTFS project.
+ * NTFS kernel journal handling.
  *
  * Copyright (c) 2002-2007 Anton Altaparmakov
  */
 
-#include <linux/bio.h>
-
 #include "attrib.h"
 #include "aops.h"
 #include "logfile.h"
-#include "malloc.h"
 #include "ntfs.h"
 
-/**
+/*
  * ntfs_check_restart_page_header - check the page header for consistency
  * @vi:		LogFile inode to which the restart page header belongs
  * @rp:		restart page header to check
@@ -116,7 +113,7 @@ skip_usa_checks:
 	return true;
 }
 
-/**
+/*
  * ntfs_check_restart_area - check the restart area for consistency
  * @vi:		LogFile inode to which the restart page belongs
  * @rp:		restart page whose restart area to check
@@ -228,7 +225,7 @@ static bool ntfs_check_restart_area(struct inode *vi, struct restart_page_header
 	return true;
 }
 
-/**
+/*
  * ntfs_check_log_client_array - check the log client array for consistency
  * @vi:		LogFile inode to which the restart page belongs
  * @rp:		restart page whose log client array to check
@@ -293,7 +290,7 @@ err_out:
 	return false;
 }
 
-/**
+/*
  * ntfs_check_and_load_restart_page - check the restart page for consistency
  * @vi:		LogFile inode to which the restart page belongs
  * @rp:		restart page to check
@@ -344,7 +341,7 @@ static int ntfs_check_and_load_restart_page(struct inode *vi,
 	 * Allocate a buffer to store the whole restart page so we can multi
 	 * sector transfer deprotect it.
 	 */
-	trp = ntfs_malloc_nofs(le32_to_cpu(rp->system_page_size));
+	trp = kvzalloc(le32_to_cpu(rp->system_page_size), GFP_NOFS);
 	if (!trp) {
 		ntfs_error(vi->i_sb, "Failed to allocate memory for LogFile restart page buffer.");
 		return -ENOMEM;
@@ -450,19 +447,19 @@ static int ntfs_check_and_load_restart_page(struct inode *vi,
 		*wrp = trp;
 	else {
 err_out:
-		ntfs_free(trp);
+		kvfree(trp);
 	}
 	return err;
 }
 
-/**
+/*
  * ntfs_check_logfile - check the journal for consistency
  * @log_vi:	struct inode of loaded journal LogFile to check
  * @rp:		[OUT] on success this is a copy of the current restart page
  *
  * Check the LogFile journal for consistency and return 'true' if it is
  * consistent and 'false' if not.  On success, the current restart page is
- * returned in *@rp.  Caller must call ntfs_free(*@rp) when finished with it.
+ * returned in *@rp.  Caller must call kvfree(*@rp) when finished with it.
  *
  * At present we only check the two restart pages and ignore the log record
  * pages.
@@ -661,12 +658,12 @@ is_empty:
 		 */
 		if (rstr2_lsn > rstr1_lsn) {
 			ntfs_debug("Using second restart page as it is more recent.");
-			ntfs_free(rstr1_ph);
+			kvfree(rstr1_ph);
 			rstr1_ph = rstr2_ph;
 			/* rstr1_lsn = rstr2_lsn; */
 		} else {
 			ntfs_debug("Using first restart page as it is more recent.");
-			ntfs_free(rstr2_ph);
+			kvfree(rstr2_ph);
 		}
 		rstr2_ph = NULL;
 	}
@@ -674,16 +671,16 @@ is_empty:
 	if (rp)
 		*rp = rstr1_ph;
 	else
-		ntfs_free(rstr1_ph);
+		kvfree(rstr1_ph);
 	ntfs_debug("Done.");
 	return true;
 err_out:
 	if (rstr1_ph)
-		ntfs_free(rstr1_ph);
+		kvfree(rstr1_ph);
 	return false;
 }
 
-/**
+/*
  * ntfs_empty_logfile - empty the contents of the LogFile journal
  * @log_vi:	struct inode of loaded journal LogFile to empty
  *
@@ -742,7 +739,7 @@ map_vcn:
 		rl++;
 
 	err = -ENOMEM;
-	empty_buf = ntfs_malloc_nofs(vol->cluster_size);
+	empty_buf = kvzalloc(vol->cluster_size, GFP_NOFS);
 	if (!empty_buf)
 		goto err;
 
@@ -769,7 +766,7 @@ map_vcn:
 		lcn = rl->lcn;
 		if (unlikely(lcn == LCN_RL_NOT_MAPPED)) {
 			vcn = rl->vcn;
-			ntfs_free(empty_buf);
+			kvfree(empty_buf);
 			goto map_vcn;
 		}
 		/* If this run is not valid abort with an error. */
@@ -793,10 +790,10 @@ map_vcn:
 #endif
 
 		do {
-			err = ntfs_dev_write(sb, empty_buf, start,
-						  vol->cluster_size, should_wait);
+			err = ntfs_bdev_write(sb, empty_buf, start,
+						  vol->cluster_size);
 			if (err) {
-				ntfs_error(sb, "ntfs_dev_write failed, err : %d\n", err);
+				ntfs_error(sb, "ntfs_bdev_write failed, err : %d\n", err);
 				goto io_err;
 			}
 
@@ -807,8 +804,18 @@ map_vcn:
 			 * completed ignore errors afterwards as we can assume
 			 * that if one buffer worked all of them will work.
 			 */
-			if (should_wait)
+			if (should_wait) {
 				should_wait = false;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 11, 0)
+				err = filemap_write_and_wait_range(sb->s_bdev->bd_mapping,
+						start, start + vol->cluster_size);
+#else
+				err = filemap_write_and_wait_range(sb->s_bdev->bd_inode->i_mapping,
+						start, start + vol->cluster_size);
+#endif
+				if (err)
+					goto io_err;
+			}
 			start += vol->cluster_size;
 		} while (start < end);
 	} while ((++rl)->vcn < end_vcn);
@@ -829,7 +836,7 @@ dirty_err:
 	NVolSetErrors(vol);
 	err = -EIO;
 err:
-	ntfs_free(empty_buf);
+	kvfree(empty_buf);
 	kfree(ra);
 	up_write(&log_ni->runlist.lock);
 	ntfs_error(sb, "Failed to fill LogFile with 0xff bytes (error %d).",

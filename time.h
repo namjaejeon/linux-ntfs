@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * NTFS time conversion functions. Part of the Linux-NTFS project.
+ * NTFS time conversion functions.
  *
  * Copyright (c) 2001-2005 Anton Altaparmakov
  */
@@ -13,7 +13,7 @@
 
 #define NTFS_TIME_OFFSET ((s64)(369 * 365 + 89) * 24 * 3600)
 
-/**
+/*
  * utc2ntfs - convert Linux UTC time to NTFS time
  * @ts:		Linux UTC time to convert to NTFS time
  *
@@ -39,7 +39,7 @@ static inline __le64 utc2ntfs(const struct timespec64 ts)
 			ts.tv_nsec / 100);
 }
 
-/**
+/*
  * get_current_ntfs_time - get the current time in little endian NTFS format
  *
  * Get the current time from the Linux kernel, convert it to its corresponding
@@ -53,7 +53,7 @@ static inline __le64 get_current_ntfs_time(void)
 	return utc2ntfs(ts);
 }
 
-/**
+/*
  * ntfs2utc - convert NTFS time to Linux time
  * @time:	NTFS time (little endian) to convert to Linux UTC
  *

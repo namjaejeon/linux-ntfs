@@ -37,9 +37,11 @@ config NTFS_FS_POSIX_ACL
 	select FS_POSIX_ACL
 	help
 	  POSIX Access Control Lists (ACLs) support additional access rights
-	  for users and groups beyond the standard owner/group/world scheme,
-	  and this option selects support for ACLs specifically for ntfs
-	  filesystems.
+	  for users and groups beyond the standard owner/group/world scheme.
+
+	  This option enables ACL support for ntfs, providing functional parity
+	  with ntfs3 drivier.
+
 	  NOTE: this is linux only feature. Windows will ignore these ACLs.
 
 	  If you don't know what Access Control Lists are, say N.

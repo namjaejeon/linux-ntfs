@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * NTFS kernel debug support. Part of the Linux-NTFS project.
+ * NTFS kernel debug support.
  *
  * Copyright (c) 2001-2004 Anton Altaparmakov
  */
@@ -19,7 +19,7 @@ extern int debug_msgs;
 extern __printf(4, 5)
 void __ntfs_debug(const char *file, int line, const char *function,
 		  const char *format, ...);
-/**
+/*
  * ntfs_debug - write a debug level message to syslog
  * @f:		a printf format string containing the message
  * @...:	the variables to substitute into @f

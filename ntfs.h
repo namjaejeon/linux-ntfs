@@ -31,12 +31,25 @@
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
-#define NTFS_DEF_PREALLOC_SIZE		(64*1024*1024)
+/*
+ * Default pre-allocation size is optimize runlist merge overhead
+ * with small chunk size.
+ */
+#define NTFS_DEF_PREALLOC_SIZE		65536
 
+/*
+ * The log2 of the standard number of clusters per compression block.
+ * A value of 4 corresponds to 16 clusters (1 << 4), which is the
+ * default chunk size used by NTFS LZNT1 compression.
+ */
 #define STANDARD_COMPRESSION_UNIT	4
-#define MAX_COMPRESSION_CLUSTER_SIZE 4096
 
-#define UCHAR_T_SIZE_BITS 1
+/*
+ * The maximum cluster size (4KB) allowed for compression to be enabled.
+ * By design, NTFS does not support compression on volumes where the
+ * cluster size exceeds 4096 bytes.
+ */
+#define MAX_COMPRESSION_CLUSTER_SIZE 4096
 
 #define NTFS_B_TO_CLU(vol, b) ((b) >> (vol)->cluster_size_bits)
 #define NTFS_CLU_TO_B(vol, clu) ((u64)(clu) << (vol)->cluster_size_bits)
@@ -73,6 +86,81 @@ enum {
 	IGNORE_CASE = 1,
 };
 
+/*
+ * Conversion helpers for NTFS units.
+ */
+
+/* Convert bytes to cluster count */
+static inline u64 ntfs_bytes_to_cluster(const struct ntfs_volume *vol,
+		s64 bytes)
+{
+	return bytes >> vol->cluster_size_bits;
+}
+
+/* Convert cluster count to bytes */
+static inline u64 ntfs_cluster_to_bytes(const struct ntfs_volume *vol,
+		u64 clusters)
+{
+	return clusters << vol->cluster_size_bits;
+}
+
+/* Get the byte offset within a cluster from a linear byte address */
+static inline u64 ntfs_bytes_to_cluster_off(const struct ntfs_volume *vol,
+		u64 bytes)
+{
+	return bytes & vol->cluster_size_mask;
+}
+
+/* Calculate the physical cluster number containing a specific MFT record. */
+static inline u64 ntfs_mft_no_to_cluster(const struct ntfs_volume *vol,
+		unsigned long mft_no)
+{
+	return ((u64)mft_no << vol->mft_record_size_bits) >>
+		vol->cluster_size_bits;
+}
+
+/* Calculate the folio index where the MFT record resides. */
+static inline pgoff_t ntfs_mft_no_to_pidx(const struct ntfs_volume *vol,
+		unsigned long mft_no)
+{
+	return mft_no >> (PAGE_SHIFT - vol->mft_record_size_bits);
+}
+
+/* Calculate the byte offset within a folio for an MFT record. */
+static inline u64 ntfs_mft_no_to_poff(const struct ntfs_volume *vol,
+		unsigned long mft_no)
+{
+	return ((u64)mft_no << vol->mft_record_size_bits) & ~PAGE_MASK;
+}
+
+/* Convert folio index to cluster number. */
+static inline u64 ntfs_pidx_to_cluster(const struct ntfs_volume *vol,
+		pgoff_t idx)
+{
+	return ((u64)idx << PAGE_SHIFT) >> vol->cluster_size_bits;
+}
+
+/* Convert cluster number to folio index. */
+static inline pgoff_t ntfs_cluster_to_pidx(const struct ntfs_volume *vol,
+		u64 clu)
+{
+	return (clu << vol->cluster_size_bits) >> PAGE_SHIFT;
+}
+
+/* Get the byte offset within a folio from a cluster number */
+static inline u64 ntfs_cluster_to_poff(const struct ntfs_volume *vol,
+		u64 clu)
+{
+	return (clu << vol->cluster_size_bits) & ~PAGE_MASK;
+}
+
+/* Convert byte offset to sector (block) number. */
+static inline sector_t ntfs_bytes_to_sector(const struct ntfs_volume *vol,
+		u64 bytes)
+{
+	return bytes >> vol->sb->s_blocksize_bits;
+}
+
 /* Global variables. */
 
 /* Slab caches (from super.c). */
@@ -84,6 +172,7 @@ extern struct kmem_cache *ntfs_index_ctx_cache;
 
 /* The various operations structs defined throughout the driver files. */
 extern const struct address_space_operations ntfs_aops;
+extern const struct address_space_operations ntfs_mft_aops;
 
 extern const struct  file_operations ntfs_file_ops;
 extern const struct inode_operations ntfs_file_inode_ops;
@@ -98,7 +187,7 @@ extern const struct inode_operations ntfs_empty_inode_ops;
 
 extern const struct export_operations ntfs_export_ops;
 
-/**
+/*
  * NTFS_SB - return the ntfs volume given a vfs super block
  * @sb:		VFS super block
  *
@@ -201,5 +290,15 @@ static inline int ntfs_ffs(int x)
 		r += 1;
 	return r;
 }
+
+/* From fs/ntfs/bdev-io.c */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 16, 0)
+int ntfs_bdev_read(struct block_device *bdev, sector_t sector, unsigned int count,
+		 char *data);
+#else
+int ntfs_dev_read(struct super_block *sb, void *buf, loff_t start, loff_t size);
+#endif
+
+int ntfs_bdev_write(struct super_block *sb, void *buf, loff_t start, loff_t size);
 
 #endif /* _LINUX_NTFS_H */

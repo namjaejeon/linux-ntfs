@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * NTFS kernel directory inode operations.
- * Part of the Linux-NTFS project.
  *
  * Copyright (c) 2001-2006 Anton Altaparmakov
  * Copyright (c) 2025 LG Electronics Co., Ltd.
@@ -11,7 +10,6 @@
 #include <linux/iversion.h>
 
 #include "ntfs.h"
-#include "malloc.h"
 #include "time.h"
 #include "index.h"
 #include "reparse.h"
@@ -42,16 +40,17 @@ static const __le16 prn_name_le[3] = {
 	cpu_to_le16('P'), cpu_to_le16('R'), cpu_to_le16('N')
 };
 
-static inline int ntfs_check_bad_char(const unsigned short *wc,
-		unsigned int wc_len)
+static inline int ntfs_check_bad_char(const __le16 *wc, unsigned int wc_len)
 {
 	int i;
 
 	for (i = 0; i < wc_len; i++) {
-		if ((wc[i] < 0x0020) ||
-		    (wc[i] == 0x0022) || (wc[i] == 0x002A) || (wc[i] == 0x002F) ||
-		    (wc[i] == 0x003A) || (wc[i] == 0x003C) || (wc[i] == 0x003E) ||
-		    (wc[i] == 0x003F) || (wc[i] == 0x005C) || (wc[i] == 0x007C))
+		u16 c = le16_to_cpu(wc[i]);
+
+		if (c < 0x0020 ||
+		    c == 0x0022 || c == 0x002A || c == 0x002F ||
+		    c == 0x003A || c == 0x003C || c == 0x003E ||
+		    c == 0x003F || c == 0x005C || c == 0x007C)
 			return -EINVAL;
 	}
 
@@ -59,7 +58,7 @@ static inline int ntfs_check_bad_char(const unsigned short *wc,
 }
 
 static int ntfs_check_bad_windows_name(struct ntfs_volume *vol,
-				       const unsigned short *wc,
+				       const __le16 *wc,
 				       unsigned int wc_len)
 {
 	if (ntfs_check_bad_char(wc, wc_len))
@@ -99,7 +98,7 @@ static int ntfs_check_bad_windows_name(struct ntfs_volume *vol,
 	return 0;
 }
 
-/**
+/*
  * ntfs_lookup - find the inode represented by a dentry in a directory inode
  * @dir_ino:	directory inode in which to look for the inode
  * @dent:	dentry representing the inode to look for
@@ -353,7 +352,7 @@ static int ntfs_sd_add_everyone(struct ntfs_inode *ni)
 	sd_len = sizeof(struct security_descriptor_relative) + 2 *
 		(sizeof(struct ntfs_sid) + 8) + sizeof(struct ntfs_acl) +
 		sizeof(struct ntfs_ace) + 4;
-	sd = ntfs_malloc_nofs(sd_len);
+	sd = kmalloc(sd_len, GFP_NOFS);
 	if (!sd)
 		return -1;
 
@@ -397,7 +396,7 @@ static int ntfs_sd_add_everyone(struct ntfs_inode *ni)
 	if (ret)
 		ntfs_error(ni->vol->sb, "Failed to add SECURITY_DESCRIPTOR\n");
 
-	ntfs_free(sd);
+	kfree(sd);
 	return ret;
 }
 
@@ -467,6 +466,18 @@ static struct ntfs_inode *__ntfs_create(struct user_namespace *mnt_userns, struc
 #else
 	inode_init_owner(mnt_userns, vi, dir, mode);
 #endif
+	mode = vi->i_mode;
+
+#ifdef CONFIG_NTFS_FS_POSIX_ACL
+	if (!S_ISLNK(mode) && (sb->s_flags & SB_POSIXACL)) {
+		err = ntfs_init_acl(idmap, vi, dir);
+		if (err)
+			goto err_out;
+	} else
+#endif
+	{
+		vi->i_flags |= S_NOSEC;
+	}
 
 	if (uid_valid(vol->uid))
 		vi->i_uid = vol->uid;
@@ -555,7 +566,7 @@ static struct ntfs_inode *__ntfs_create(struct user_namespace *mnt_userns, struc
 	 */
 	si_len = offsetof(struct standard_information, file_attributes) +
 		sizeof(__le32) + 12;
-	si = ntfs_malloc_nofs(si_len);
+	si = kzalloc(si_len, GFP_NOFS);
 	if (!si) {
 		err = -ENOMEM;
 		goto err_out;
@@ -592,7 +603,7 @@ static struct ntfs_inode *__ntfs_create(struct user_namespace *mnt_userns, struc
 		/* Create struct index_root attribute. */
 		index_len = sizeof(struct index_header) + sizeof(struct index_entry_header);
 		ir_len = offsetof(struct index_root, index) + index_len;
-		ir = ntfs_malloc_nofs(ir_len);
+		ir = kzalloc(ir_len, GFP_NOFS);
 		if (!ir) {
 			err = -ENOMEM;
 			goto err_out;
@@ -617,11 +628,11 @@ static struct ntfs_inode *__ntfs_create(struct user_namespace *mnt_userns, struc
 		/* Add struct index_root attribute to inode. */
 		err = ntfs_attr_add(ni, AT_INDEX_ROOT, I30, 4, (u8 *)ir, ir_len);
 		if (err) {
-			ntfs_free(ir);
+			kfree(ir);
 			ntfs_error(vi->i_sb, "Failed to add struct index_root attribute.\n");
 			goto err_out;
 		}
-		ntfs_free(ir);
+		kfree(ir);
 		err = ntfs_attr_open(ni, AT_INDEX_ROOT, I30, 4);
 		if (err)
 			goto err_out;
@@ -661,7 +672,7 @@ static struct ntfs_inode *__ntfs_create(struct user_namespace *mnt_userns, struc
 
 	/* Create FILE_NAME attribute. */
 	fn_len = sizeof(struct file_name_attr) + name_len * sizeof(__le16);
-	fn = ntfs_malloc_nofs(fn_len);
+	fn = kzalloc(fn_len, GFP_NOFS);
 	if (!fn) {
 		err = -ENOMEM;
 		goto err_out;
@@ -684,7 +695,7 @@ static struct ntfs_inode *__ntfs_create(struct user_namespace *mnt_userns, struc
 		if (rollback_reparse)
 			fn->file_attributes |= FILE_ATTR_REPARSE_POINT;
 	}
-	if (NVolHideDotFiles(vol) && (name_len > 0 && name[0] == '.'))
+	if (NVolHideDotFiles(vol) && name_len > 0 && name[0] == cpu_to_le16('.'))
 		fn->file_attributes |= FILE_ATTR_HIDDEN;
 	fn->creation_time = fn->last_data_change_time = utc2ntfs(ni->i_crtime);
 	fn->last_mft_change_time = fn->last_access_time = fn->creation_time;
@@ -720,20 +731,9 @@ static struct ntfs_inode *__ntfs_create(struct user_namespace *mnt_userns, struc
 	set_nlink(vi, 1);
 	ntfs_set_vfs_operations(vi, mode, dev);
 
-#ifdef CONFIG_NTFS_FS_POSIX_ACL
-	if (!S_ISLNK(mode) && (sb->s_flags & SB_POSIXACL)) {
-		err = ntfs_init_acl(idmap, vi, dir);
-		if (err)
-			goto err_out;
-	} else
-#endif
-	{
-		vi->i_flags |= S_NOSEC;
-	}
-
 	/* Done! */
-	ntfs_free(fn);
-	ntfs_free(si);
+	kfree(fn);
+	kfree(si);
 	ntfs_debug("Done.\n");
 	return ni;
 
@@ -764,8 +764,8 @@ err_out:
 		ntfs_error(sb,
 			"Failed to free MFT record. Leaving inconsistent metadata. Run chkdsk.\n");
 	unmap_mft_record(ni);
-	ntfs_free(fn);
-	ntfs_free(si);
+	kfree(fn);
+	kfree(si);
 
 	mutex_unlock(&dir_ni->mrec_lock);
 	mutex_unlock(&ni->mrec_lock);
@@ -863,7 +863,7 @@ static int ntfs_test_inode_attr(struct inode *vi, void *data)
 		return 0;
 }
 
-/**
+/*
  * ntfs_delete - delete file or directory from ntfs volume
  * @ni:         ntfs inode for object to delte
  * @dir_ni:     ntfs inode for directory in which delete object
@@ -873,6 +873,8 @@ static int ntfs_test_inode_attr(struct inode *vi, void *data)
  *
  * Delete the specified name from the directory index @dir_ni and decrement
  * the link count of the target inode @ni.
+ *
+ * Return 0 on success and -errno on error.
  */
 static int ntfs_delete(struct ntfs_inode *ni, struct ntfs_inode *dir_ni,
 		__le16 *name, u8 name_len, bool need_lock)
@@ -1239,7 +1241,7 @@ out:
 	return err;
 }
 
-/**
+/*
  * __ntfs_link - create hard link for file or directory
  * @ni:		ntfs inode for object to create hard link
  * @dir_ni:	ntfs inode for directory in which new link should be placed
@@ -1248,6 +1250,8 @@ out:
  *
  * Create a new hard link. This involves adding an entry to the directory
  * index and adding a new FILE_NAME attribute to the target inode.
+ *
+ * Return 0 on success and -errno on error.
  */
 static int __ntfs_link(struct ntfs_inode *ni, struct ntfs_inode *dir_ni,
 		__le16 *name, u8 name_len)
@@ -1277,7 +1281,11 @@ static int __ntfs_link(struct ntfs_inode *ni, struct ntfs_inode *dir_ni,
 
 	/* Create FILE_NAME attribute. */
 	fn_len = sizeof(struct file_name_attr) + name_len * sizeof(__le16);
-	fn = ntfs_malloc_nofs(fn_len);
+	if (name_len > NTFS_MAX_NAME_LEN) {
+		err = -EIO;
+		goto err_out;
+	}
+	fn = kzalloc(fn_len, GFP_NOFS);
 	if (!fn) {
 		err = -ENOMEM;
 		goto err_out;
@@ -1306,7 +1314,7 @@ static int __ntfs_link(struct ntfs_inode *ni, struct ntfs_inode *dir_ni,
 			fn->allocated_size = cpu_to_le64(ni->allocated_size);
 		fn->data_size = cpu_to_le64(ni->data_size);
 	}
-	if (NVolHideDotFiles(dir_ni->vol) && (name_len > 0 && name[0] == '.'))
+	if (NVolHideDotFiles(dir_ni->vol) && name_len > 0 && name[0] == cpu_to_le16('.'))
 		fn->file_attributes |= FILE_ATTR_HIDDEN;
 
 	fn->creation_time = utc2ntfs(ni->i_crtime);
@@ -1343,7 +1351,7 @@ static int __ntfs_link(struct ntfs_inode *ni, struct ntfs_inode *dir_ni,
 
 	/* Done! */
 	mark_mft_record_dirty(ni);
-	ntfs_free(fn);
+	kfree(fn);
 	unmap_mft_record(ni);
 
 	ntfs_debug("Done.\n");
@@ -1352,7 +1360,7 @@ static int __ntfs_link(struct ntfs_inode *ni, struct ntfs_inode *dir_ni,
 rollback_failed:
 	ntfs_error(sb, "Rollback failed. Leaving inconsistent metadata.\n");
 err_out:
-	ntfs_free(fn);
+	kfree(fn);
 	if (!IS_ERR_OR_NULL(ni_mrec))
 		unmap_mft_record(ni);
 	return err;
@@ -1746,11 +1754,11 @@ static int ntfs_link(struct dentry *old_dentry, struct inode *dir,
 	mutex_unlock(&ni->mrec_lock);
 
 out:
-	ntfs_free(uname);
+	kfree(uname);
 	return err;
 }
 
-/**
+/*
  * Inode operations for directories.
  */
 const struct inode_operations ntfs_dir_inode_ops = {
@@ -1770,7 +1778,7 @@ const struct inode_operations ntfs_dir_inode_ops = {
 	.link		= ntfs_link,
 };
 
-/**
+/*
  * ntfs_get_parent - find the dentry of the parent of a given directory dentry
  * @child_dent:		dentry of the directory whose parent directory to find
  *
@@ -1865,7 +1873,7 @@ static struct dentry *ntfs_fh_to_parent(struct super_block *sb, struct fid *fid,
 				    ntfs_nfs_get_inode);
 }
 
-/**
+/*
  * Export operations allowing NFS exporting of mounted NTFS partitions.
  */
 const struct export_operations ntfs_export_ops = {

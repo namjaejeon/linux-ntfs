@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * NTFS multi sector transfer protection handling code.
- * Part of the Linux-NTFS project.
  *
  * Copyright (c) 2001-2004 Anton Altaparmakov
  */
@@ -10,7 +9,7 @@
 
 #include "ntfs.h"
 
-/**
+/*
  * post_read_mst_fixup - deprotect multi sector transfer protected data
  * @b:		pointer to the data to deprotect
  * @size:	size in bytes of @b
@@ -92,7 +91,7 @@ int post_read_mst_fixup(struct ntfs_record *b, const u32 size)
 	return 0;
 }
 
-/**
+/*
  * pre_write_mst_fixup - apply multi sector transfer protection
  * @b:		pointer to the data to protect
  * @size:	size in bytes of @b
@@ -160,7 +159,7 @@ int pre_write_mst_fixup(struct ntfs_record *b, const u32 size)
 	return 0;
 }
 
-/**
+/*
  * post_write_mst_fixup - fast deprotect multi sector transfer protected data
  * @b:		pointer to the data to deprotect
  *

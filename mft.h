@@ -1,7 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Defines for mft record handling in NTFS Linux kernel driver.
- * Part of the Linux-NTFS project.
  *
  * Copyright (c) 2001-2004 Anton Altaparmakov
  */
@@ -26,7 +25,7 @@ static inline void unmap_extent_mft_record(struct ntfs_inode *ni)
 
 void __mark_mft_record_dirty(struct ntfs_inode *ni);
 
-/**
+/*
  * mark_mft_record_dirty - set the mft record and the page containing it dirty
  * @ni:		ntfs inode describing the mapped mft record
  *
@@ -47,7 +46,7 @@ int ntfs_sync_mft_mirror(struct ntfs_volume *vol, const unsigned long mft_no,
 		struct mft_record *m);
 int write_mft_record_nolock(struct ntfs_inode *ni, struct mft_record *m, int sync);
 
-/**
+/*
  * write_mft_record - write out a mapped (extent) mft record
  * @ni:		ntfs inode describing the mapped (extent) mft record
  * @m:		mapped (extent) mft record to write
@@ -89,7 +88,7 @@ static inline int write_mft_record(struct ntfs_inode *ni, struct mft_record *m, 
 
 bool ntfs_may_write_mft_record(struct ntfs_volume *vol,
 		const unsigned long mft_no, const struct mft_record *m,
-		struct ntfs_inode **locked_ni);
+		struct ntfs_inode **locked_ni, struct inode **ref_vi);
 int ntfs_mft_record_alloc(struct ntfs_volume *vol, const int mode,
 		struct ntfs_inode **ni, struct ntfs_inode *base_ni,
 		struct mft_record **ni_mrec);
@@ -98,5 +97,6 @@ int ntfs_mft_records_write(const struct ntfs_volume *vol, const u64 mref,
 		const s64 count, struct mft_record *b);
 int ntfs_mft_record_check(const struct ntfs_volume *vol, struct mft_record *m,
 			  unsigned long mft_no);
-
+int ntfs_mft_writepages(struct address_space *mapping,
+		struct writeback_control *wbc);
 #endif /* _LINUX_NTFS_MFT_H */

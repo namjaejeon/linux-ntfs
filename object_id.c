@@ -2,7 +2,7 @@
 /*
  * Pocessing of object ids
  *
- * Part of this file is based on code from the NTFS-3G project.
+ * Part of this file is based on code from the NTFS-3G.
  *
  * Copyright (c) 2009-2019 Jean-Pierre Andre
  * Copyright (c) 2026 LG Electronics Co., Ltd.
@@ -14,7 +14,6 @@
 
 struct object_id_index_key {
 	union {
-		/* alignment may be needed to evaluate collations */
 		u32 alignment;
 		struct guid guid;
 	} object_id;
@@ -89,7 +88,7 @@ put_dir_vi:
 }
 
 
-/**
+/*
  * remove_object_id_index - Remove an object id index entry if attribute present
  * @ni: NTFS inode structure containing the attribute
  * @xo:	Index context for the object id index
@@ -118,7 +117,7 @@ static int remove_object_id_index(struct ntfs_inode *ni, struct ntfs_index_conte
 	return 0;
 }
 
-/**
+/*
  * ntfs_delete_object_id_index - Delete an object_id index entry
  * @ni:	NTFS inode structure
  *

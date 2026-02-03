@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * NTFS kernel quota ($Quota) handling.
- * Part of the Linux-NTFS project.
  *
  * Copyright (c) 2004 Anton Altaparmakov
  */
@@ -11,7 +10,7 @@
 #include "debug.h"
 #include "ntfs.h"
 
-/**
+/*
  * ntfs_mark_quotas_out_of_date - mark the quotas out of date on an ntfs volume
  * @vol:	ntfs volume on which to mark the quotas out of date
  *
@@ -75,8 +74,6 @@ bool ntfs_mark_quotas_out_of_date(struct ntfs_volume *vol)
 	 * rescan the volume on boot and update all quota entries.
 	 */
 	qce->flags |= QUOTA_FLAG_OUT_OF_DATE;
-	/* Ensure the modified flags are written to disk. */
-	ntfs_index_entry_flush_dcache_page(ictx);
 	ntfs_index_entry_mark_dirty(ictx);
 set_done:
 	ntfs_index_ctx_put(ictx);
