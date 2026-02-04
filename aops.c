@@ -8,8 +8,6 @@
  */
 
 #include <linux/writeback.h>
-#include <linux/mpage.h>
-#include <linux/uio.h>
 
 #include "aops.h"
 #include "attrib.h"
