@@ -2669,7 +2669,7 @@ static int ntfs_inode_sync_standard_information(struct inode *vi, struct mft_rec
 	 * and the base mft record may actually not have been modified so it
 	 * might not need to be written out.
 	 * NOTE: It is not a problem when the inode for $MFT itself is being
-	 * written out as mark_ntfs_record_dirty() will only set I_DIRTY_PAGES
+	 * written out as ntfs_mft_mark_dirty() will only set I_DIRTY_PAGES
 	 * on the $MFT inode and hence ntfs_write_inode() will not be
 	 * re-invoked because of it which in turn is ok since the dirtied mft
 	 * record will be cleaned and written out to disk below, i.e. before

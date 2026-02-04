@@ -490,18 +490,3 @@ const struct address_space_operations ntfs_mft_aops = {
 	.invalidatepage		= iomap_invalidatepage,
 #endif
 };
-
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
-void mark_ntfs_record_dirty(struct folio *folio)
-{
-	iomap_dirty_folio(folio->mapping, folio);
-#else
-void mark_ntfs_record_dirty(struct page *page)
-{
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 18, 0)
-	filemap_dirty_folio(page->mapping, page_folio(page));
-#else
-	__set_page_dirty_nobuffers(page);
-#endif
-#endif
-}
