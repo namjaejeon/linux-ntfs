@@ -17,15 +17,12 @@
  * garbage values can be read, so zeroing out is needed.
  */
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0)
-static void ntfs_iomap_put_folio(struct inode *inode, loff_t pos,
-		unsigned int len, struct folio *folio)
+static void ntfs_iomap_put_folio_non_resident(struct inode *inode, loff_t pos,
+					      unsigned int len, struct folio *folio)
 {
 	struct ntfs_inode *ni = NTFS_I(inode);
 	unsigned long sector_size = 1UL << inode->i_blkbits;
 	loff_t start_down, end_up, init;
-
-	if (!NInoNonResident(ni))
-		goto out;
 
 	start_down = round_down(pos, sector_size);
 	end_up = (pos + len - 1) | (sector_size - 1);
@@ -66,8 +63,20 @@ static void ntfs_iomap_put_folio(struct inode *inode, loff_t pos,
 				    offset2,
 				    folio_size(folio));
 	}
+	folio_unlock(folio);
+	folio_put(folio);
+}
 
-out:
+/*
+ * iomap_zero_range is called for an area beyond the initialized size,
+ * garbage values can be read, so zeroing out is needed.
+ */
+static void ntfs_iomap_put_folio(struct inode *inode, loff_t pos,
+		unsigned int len, struct folio *folio)
+{
+	if (NInoNonResident(NTFS_I(inode)))
+		return ntfs_iomap_put_folio_non_resident(inode, pos,
+							 len, folio);
 	folio_unlock(folio);
 	folio_put(folio);
 }
