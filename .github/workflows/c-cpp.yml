@@ -25,20 +25,50 @@ jobs:
         sudo apt-get update
         sudo apt-get install libelf-dev wget tar gzip
         sudo apt-get remove libntfs-3g89 ntfs-3g
-        #    - name: download kernel
-        #      run: wget --no-check-certificate https://mirrors.edge.kernel.org/pub/linux/kernel/v5.x/linux-5.4.109.tar.gz
-        #    - name: decompress kernel source
-        #      run: tar xf linux-5.4.109.tar.gz
-        #    - name: ntfs build test on linux 5.4 kernel
-        #      run: |
-        #        rm -rf linux-5.4.109/fs/ntfs/*
-        #        mv linux-5.4.109 ../
-        #        cp -ar * ../linux-5.4.109/fs/ntfs/
-        #        cd ../linux-5.4.109/
-        #        yes "" | make oldconfig > /dev/null
-        #        echo 'CONFIG_NTFS_FS=m' >> .config
-        #        make -j$((`nproc`+1)) fs/ntfs/ntfs.ko
-        #        cd ../linux-ntfs
+    - name: build test with 6.1 kernels
+      run: |
+        wget --no-check-certificate https://mirrors.edge.kernel.org/pub/linux/kernel/v6.x/linux-6.1.161.tar.gz
+        tar xf linux-6.1.161.tar.gz
+        rm linux-6.1.161.tar.gz
+        rm -rf linux-6.1.161/fs/ntfs/*
+        mv linux-6.1.161 ../
+        cp -ar * ../linux-6.1.161/fs/ntfs/
+        cd ../linux-6.1.161/
+        yes "" | make oldconfig > /dev/null
+        echo 'CONFIG_NTFS_FS=m' >> .config
+        make -j$((`nproc`+1)) KBUILD_MODPOST_WARN=1 KBUILD_MODPOST_NOFINAL=1 fs/ntfs/ntfs.ko
+        cd ../linux-ntfs
+        rm -rf ../linux-6.1.161/
+    - name: build test with 6.6 kernels
+      run: |
+        wget --no-check-certificate https://mirrors.edge.kernel.org/pub/linux/kernel/v6.x/linux-6.6.122.tar.gz
+        tar xf linux-6.6.122.tar.gz
+        rm linux-6.6.122.tar.gz
+        rm -rf linux-6.6.122/fs/ntfs/*
+        mv linux-6.6.122 ../
+        cp -ar * ../linux-6.6.122/fs/ntfs/
+        cd ../linux-6.6.122/
+        yes "" | make oldconfig > /dev/null
+        echo 'CONFIG_NTFS_FS=m' >> .config
+        make -j$((`nproc`+1)) KBUILD_MODPOST_WARN=1 KBUILD_MODPOST_NOFINAL=1 fs/ntfs/ntfs.ko
+        cd ../linux-ntfs
+        rm -rf ../linux-6.6.122/
+    - name: build test with 6.12 kernels
+      run: |
+        wget --no-check-certificate https://mirrors.edge.kernel.org/pub/linux/kernel/v6.x/linux-6.12.68.tar.gz
+        tar xf linux-6.12.68.tar.gz
+        rm linux-6.12.68.tar.gz
+        mkdir linux-6.12.68/fs/ntfs/
+        mv linux-6.12.68 ../
+        cp -ar * ../linux-6.12.68/fs/ntfs/
+        cd ../linux-6.12.68/
+        yes "" | make oldconfig > /dev/null
+        sed -i '/source "fs\/fat\/Kconfig"/a source "fs\/ntfs\/Kconfig"' fs/Kconfig
+        sed -i '/obj-\$(CONFIG_EXFAT_FS).*+= exfat\//i obj-$(CONFIG_NTFS_FS)       += ntfs/' fs/Makefile
+        echo 'CONFIG_NTFS_FS=m' >> .config
+        make -j$((`nproc`+1)) KBUILD_MODPOST_WARN=1 KBUILD_MODPOST_NOFINAL=1 fs/ntfs/ntfs.ko
+        cd ../linux-ntfs
+        rm -rf ../linux-6.12.68/
     - name: Prerequisite for xfstests testing
       run: |
         sudo apt-get install linux-headers-$(uname -r)
