@@ -1959,6 +1959,7 @@ static void ntfs_put_super(struct super_block *sb)
 
 	iput(vol->mft_ino);
 	vol->mft_ino = NULL;
+	blkdev_issue_flush(sb->s_bdev);
 
 	ntfs_volume_free(vol);
 }
