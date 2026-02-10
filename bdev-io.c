@@ -25,47 +25,50 @@
  * If the destination buffer @data is not a vmalloc address, it falls back
  * to the more efficient bdev_rw_virt() helper.
  */
-int ntfs_bdev_read(struct block_device *bdev, sector_t sector, unsigned int count,
-		 char *data)
+int ntfs_bdev_read(struct block_device *bdev, char *data, loff_t start, size_t size)
 {
 	unsigned int done = 0, added;
 	int error;
 	struct bio *bio;
 	enum req_op op;
+	sector_t sector = start >> SECTOR_SHIFT;
+
+	if (start & (SECTOR_SIZE - 1))
+		return -EINVAL;
 
 	op = REQ_OP_READ | REQ_META | REQ_SYNC;
 	if (!is_vmalloc_addr(data))
-		return bdev_rw_virt(bdev, sector, data, count, op);
+		return bdev_rw_virt(bdev, sector, data, size, op);
 
 	bio = bio_alloc(bdev,
-			bio_max_segs(DIV_ROUND_UP(count, PAGE_SIZE)),
+			bio_max_segs(DIV_ROUND_UP(size, PAGE_SIZE)),
 			op, GFP_KERNEL);
 	bio->bi_iter.bi_sector = sector;
 
 	do {
-		added = bio_add_vmalloc_chunk(bio, data + done, count - done);
+		added = bio_add_vmalloc_chunk(bio, data + done, size - done);
 		if (!added) {
 			struct bio	*prev = bio;
 
 			bio = bio_alloc(prev->bi_bdev,
-					bio_max_segs(DIV_ROUND_UP(count - done, PAGE_SIZE)),
+					bio_max_segs(DIV_ROUND_UP(size - done, PAGE_SIZE)),
 					prev->bi_opf, GFP_KERNEL);
 			bio->bi_iter.bi_sector = bio_end_sector(prev);
 			bio_chain(prev, bio);
 			submit_bio(prev);
 		}
 		done += added;
-	} while (done < count);
+	} while (done < size);
 
 	error = submit_bio_wait(bio);
 	bio_put(bio);
 
 	if (op == REQ_OP_READ)
-		invalidate_kernel_vmap_range(data, count);
+		invalidate_kernel_vmap_range(data, size);
 	return error;
 }
 #else
-int ntfs_dev_read(struct super_block *sb, void *buf, loff_t start, loff_t size)
+int ntfs_dev_read(struct super_block *sb, void *buf, loff_t start, size_t size)
 {
 	pgoff_t idx, idx_end;
 	loff_t offset, end = start + size;
@@ -102,7 +105,7 @@ int ntfs_dev_read(struct super_block *sb, void *buf, loff_t start, loff_t size)
 }
 #endif
 #else
-int ntfs_dev_read(struct super_block *sb, void *buf, loff_t start, loff_t size)
+int ntfs_dev_read(struct super_block *sb, void *buf, loff_t start, size_t size)
 {
 	pgoff_t idx, idx_end;
 	loff_t offset, end = start + size;
@@ -151,7 +154,7 @@ int ntfs_dev_read(struct super_block *sb, void *buf, loff_t start, loff_t size)
  * cache of the block device's address space.
  */
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
-int ntfs_bdev_write(struct super_block *sb, void *buf, loff_t start, loff_t size)
+int ntfs_bdev_write(struct super_block *sb, void *buf, loff_t start, size_t size)
 {
 	pgoff_t idx, idx_end;
 	loff_t offset, end = start + size;
@@ -189,7 +192,7 @@ int ntfs_bdev_write(struct super_block *sb, void *buf, loff_t start, loff_t size
 	return 0;
 }
 #else
-int ntfs_bdev_write(struct super_block *sb, void *buf, loff_t start, loff_t size)
+int ntfs_bdev_write(struct super_block *sb, void *buf, loff_t start, size_t size)
 {
 	pgoff_t idx, idx_end;
 	loff_t offset, end = start + size;
