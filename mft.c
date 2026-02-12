@@ -1560,7 +1560,8 @@ static int ntfs_mft_bitmap_extend_allocation_nolock(struct ntfs_volume *vol)
 		ret = ntfs_mft_attr_extend(mftbmp_ni);
 		if (!ret)
 			goto extended_ok;
-		status.mp_extended = 1;
+		if (ret != -EAGAIN)
+			status.mp_extended = 1;
 		goto undo_alloc;
 	}
 	status.mp_rebuilt = 1;
@@ -1997,7 +1998,8 @@ static int ntfs_mft_data_extend_allocation_nolock(struct ntfs_volume *vol)
 		ret = ntfs_mft_attr_extend(mft_ni);
 		if (!ret)
 			goto extended_ok;
-		mp_extended = true;
+		if (ret != -EAGAIN)
+			mp_extended = true;
 		goto undo_alloc;
 	}
 	mp_rebuilt = true;
