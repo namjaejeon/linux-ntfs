@@ -1585,6 +1585,7 @@ static int ntfs_mft_bitmap_extend_allocation_nolock(struct ntfs_volume *vol)
 		 * first ensure the changes will make it to disk later.
 		 */
 		mark_mft_record_dirty(ctx->ntfs_ino);
+extended_ok:
 		ntfs_attr_reinit_search_ctx(ctx);
 		ret = ntfs_attr_lookup(mftbmp_ni->type, mftbmp_ni->name,
 				mftbmp_ni->name_len, CASE_SENSITIVE, 0, NULL,
@@ -1597,7 +1598,6 @@ static int ntfs_mft_bitmap_extend_allocation_nolock(struct ntfs_volume *vol)
 		a = ctx->attr;
 	}
 
-extended_ok:
 	write_lock_irqsave(&mftbmp_ni->size_lock, flags);
 	mftbmp_ni->allocated_size += vol->cluster_size;
 	a->data.non_resident.allocated_size =
@@ -2023,6 +2023,7 @@ static int ntfs_mft_data_extend_allocation_nolock(struct ntfs_volume *vol)
 		 * first ensure the changes will make it to disk later.
 		 */
 		mark_mft_record_dirty(ctx->ntfs_ino);
+extended_ok:
 		ntfs_attr_reinit_search_ctx(ctx);
 		ret = ntfs_attr_lookup(mft_ni->type, mft_ni->name,
 				mft_ni->name_len, CASE_SENSITIVE, 0, NULL, 0,
@@ -2035,7 +2036,6 @@ static int ntfs_mft_data_extend_allocation_nolock(struct ntfs_volume *vol)
 		a = ctx->attr;
 	}
 
-extended_ok:
 	write_lock_irqsave(&mft_ni->size_lock, flags);
 	mft_ni->allocated_size += NTFS_CLU_TO_B(vol, nr);
 	a->data.non_resident.allocated_size =
