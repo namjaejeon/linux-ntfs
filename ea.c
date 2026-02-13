@@ -877,6 +877,11 @@ static noinline int ntfs_set_acl_ex(struct mnt_idmap *idmap,
 		value = NULL;
 		flags = XATTR_REPLACE;
 	} else {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 0, 0)
+		value = posix_acl_to_xattr(&init_user_ns, acl, &size, GFP_NOFS);
+		if (!value)
+			return -ENOMEM;
+#else
 		size = posix_acl_xattr_size(acl->a_count);
 		value = kmalloc(size, GFP_NOFS);
 		if (!value)
@@ -884,6 +889,7 @@ static noinline int ntfs_set_acl_ex(struct mnt_idmap *idmap,
 		err = posix_acl_to_xattr(&init_user_ns, acl, value, size);
 		if (err < 0)
 			goto out;
+#endif
 		flags = 0;
 	}
 
