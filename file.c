@@ -28,6 +28,10 @@
 #include "bitmap.h"
 #include "uapi_ntfs.h"
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 0, 0)
+#include <linux/filelock.h>
+#endif
+
 /*
  * ntfs_file_open - called when an inode is about to be opened
  * @vi:		inode to be opened
@@ -1319,6 +1323,9 @@ const struct file_operations ntfs_file_ops = {
 #endif
 #endif
 	.fallocate	= ntfs_fallocate,
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 0, 0)
+	.setlease	= generic_setlease,
+#endif
 };
 
 const struct inode_operations ntfs_file_inode_ops = {

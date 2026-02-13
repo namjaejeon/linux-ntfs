@@ -15,6 +15,10 @@
 #include "index.h"
 #include "reparse.h"
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 0, 0)
+#include <linux/filelock.h>
+#endif
+
 /*
  * The little endian Unicode string $I30 as a global constant.
  */
@@ -1257,5 +1261,8 @@ const struct file_operations ntfs_dir_ops = {
 #ifdef CONFIG_COMPAT
 	.compat_ioctl	= ntfs_compat_ioctl,
 #endif
+#endif
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 0, 0)
+	.setlease	= generic_setlease,
 #endif
 };
