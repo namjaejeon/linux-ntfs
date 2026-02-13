@@ -14,16 +14,21 @@
 /*
  * ntfs_bdev_read - Read data directly from block device using bio
  * @bdev:	block device to read from
- * @sector:	starting sector number
- * @count:	number of bytes to read
  * @data:	destination buffer
+ * @start:	starting byte offset on the block device
+ * @size:	number of bytes to read
  *
- * Reads @count bytes starting from @sector directly from the block device
- * using one or more BIOs. This function bypasses the page cache completely
- * and performs synchronous I/O with REQ_META | REQ_SYNC flags set.
+ * Reads @size bytes starting from byte offset @start directly from the block
+ * device using one or more BIOs. This function bypasses the page cache
+ * completely and performs synchronous I/O with REQ_META | REQ_SYNC flags set.
+ *
+ * The @start offset must be sector-aligned (512 bytes). If it is not aligned,
+ * the function will return -EINVAL.
  *
  * If the destination buffer @data is not a vmalloc address, it falls back
  * to the more efficient bdev_rw_virt() helper.
+ *
+ * Return: 0 on success, negative error code on failure.
  */
 int ntfs_bdev_read(struct block_device *bdev, char *data, loff_t start, size_t size)
 {
