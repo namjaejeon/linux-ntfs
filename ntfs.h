@@ -12,6 +12,10 @@
 
 #include <linux/stddef.h>
 #include <linux/kernel.h>
+#include <linux/version.h>
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 0, 0)
+#include <linux/hex.h>
+#endif
 #include <linux/module.h>
 #include <linux/compiler.h>
 #include <linux/fs.h>
@@ -19,7 +23,6 @@
 #include <linux/smp.h>
 #include <linux/pagemap.h>
 #include <linux/uidgid.h>
-#include <linux/version.h>
 
 #include "volume.h"
 #include "layout.h"
