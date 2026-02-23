@@ -786,8 +786,13 @@ static int ntfs_file_mmap(struct file *file, struct vm_area_struct *vma)
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
 		from = ((loff_t)desc->pgoff << PAGE_SHIFT);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 19, 0)
+		to = min_t(loff_t, i_size_read(inode),
+			   from + vma_desc_size(desc));
+#else
 		to = min_t(loff_t, i_size_read(inode),
 			   from + desc->end - desc->start);
+#endif
 #else
 		from = ((loff_t)vma->vm_pgoff << PAGE_SHIFT);
 		to = min_t(loff_t, i_size_read(inode),
