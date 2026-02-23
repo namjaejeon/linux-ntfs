@@ -772,7 +772,11 @@ static int ntfs_file_mmap(struct file *file, struct vm_area_struct *vma)
 		return -EOPNOTSUPP;
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 0, 0)
+	if (vma_desc_test_flags(desc, VMA_WRITE_BIT)) {
+#else
 	if (desc->vm_flags & VM_WRITE) {
+#endif
 #else
 	if (vma->vm_flags & VM_WRITE) {
 #endif
