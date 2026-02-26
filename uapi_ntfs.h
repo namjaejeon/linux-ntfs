@@ -20,4 +20,41 @@
 #define FS_SHUTDOWN_FLAGS_LOGFLUSH	0x1	/* flush log but not data*/
 #define FS_SHUTDOWN_FLAGS_NOLOGFLUSH	0x2	/* don't flush log nor data */
 
+#define NTFS_IOC_MAGIC	'N'
+
+/*
+ * ntfs named stream ioctl structure.
+ *
+ * @offset:		Start offset in stream.
+ * @length:		Byte length to read/write.
+ * @flags:		flags.
+ * @reserved:		Reserved.
+ * @name_len:		Stream name length.
+ * @data_size:		Stream size.
+ * @name:		Stream name.
+ * @data:		named stream data.
+ */
+struct ntfs_stream_req {
+	__u64 offset;
+	__u64 length;
+	__u32 flags;
+	__u64 result_size;
+	__u32 reserved;
+	__u32 name_len;
+	const char __user *name;
+	void __user *data;
+};
+
+/*
+ * Flags for NTFS_IOC_STREAM.
+ */
+enum {
+	NTFS_STREAM_READ	= 0,
+	NTFS_STREAM_WRITE,
+	NTFS_STREAM_GET_SIZE,
+	NTFS_STREAM_REMOVE
+};
+
+#define NTFS_IOC_STREAM			_IOWR(NTFS_IOC_MAGIC, 1, struct ntfs_stream_req)
+
 #endif /* _UAPI_LINUX_NTFS_H */

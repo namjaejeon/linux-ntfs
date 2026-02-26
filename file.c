@@ -27,6 +27,7 @@
 #include "iomap.h"
 #include "bitmap.h"
 #include "uapi_ntfs.h"
+#include "mft.h"
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 0, 0)
 #include <linux/filelock.h>
@@ -929,6 +930,313 @@ static int ntfs_ioctl_fitrim(struct ntfs_volume *vol, unsigned long arg)
 	return 0;
 }
 
+/*
+ * ntfs_get_stream_size - Get the size of a named $DATA stream.
+ *
+ * @ni:		NTFS inode
+ * @name:	Stream name (kernel space, UTF-8)
+ * @name_len:	Length of name (bytes)
+ * @size:	[out] Stream valid data size
+ *
+ * Return:	0 on success, negative error
+ */
+static int ntfs_get_stream_size(struct ntfs_inode *ni, __le16 *uname,
+		u32 uname_len, u64 *stream_size)
+{
+	struct ntfs_attr_search_ctx *ctx;
+	int err = 0;
+	u64 size = 0;
+
+	if (!ni || !uname || uname_len == 0)
+		return -EINVAL;
+
+	mutex_lock(&ni->mrec_lock);
+	ctx = ntfs_attr_get_search_ctx(ni, NULL);
+	if (!ctx) {
+		mutex_unlock(&ni->mrec_lock);
+		return -ENOMEM;
+	}
+
+	err = ntfs_attr_lookup(AT_DATA, uname, uname_len, CASE_SENSITIVE, 0,
+			NULL, 0, ctx);
+	if (err)
+		goto out;
+
+	if (ctx->attr->non_resident)
+		size = le64_to_cpu(ctx->attr->data.non_resident.data_size);
+	else
+		size = le32_to_cpu(ctx->attr->data.resident.value_length);
+
+	*stream_size = size;
+out:
+	ntfs_attr_put_search_ctx(ctx);
+	mutex_unlock(&ni->mrec_lock);
+	return err;
+}
+
+/*
+ * ntfs_read_named_stream - Read data from a named $DATA stream.
+ *
+ * @ni:		NTFS inode
+ * @name:	Stream name (UTF-8)
+ * @name_len:	Length of name (bytes)
+ * @offset:	Byte offset in the stream
+ * @len:	Number of bytes to read
+ * @argp:	User buffer to copy data to (__user)
+ *
+ * Return:	0 on success, negative error code otherwise.
+ *		If offset >= stream size, returns 0.
+ */
+static int ntfs_read_named_stream(struct ntfs_inode *ni, __le16 *uname,
+		u32 uname_len, u64 offset, u64 len, void __user *data_buf,
+		u64 *rbytes)
+{
+	struct ntfs_attr_search_ctx *ctx;
+	struct inode *attr_vi;
+	int err;
+	u64 data_size;
+	u64 read_bytes = 0;
+	char *rbuf = NULL;
+
+	if (!ni || !uname || uname_len == 0)
+		return -EINVAL;
+
+	mutex_lock(&ni->mrec_lock);
+	ctx = ntfs_attr_get_search_ctx(ni, NULL);
+	if (!ctx) {
+		mutex_unlock(&ni->mrec_lock);
+		return -ENOMEM;
+	}
+
+	err = ntfs_attr_lookup(AT_DATA, uname, uname_len, CASE_SENSITIVE, 0,
+			NULL, 0, ctx);
+	if (err)
+		goto out;
+
+	if (ctx->attr->non_resident)
+		data_size = le64_to_cpu(ctx->attr->data.non_resident.data_size);
+	else
+		data_size = le32_to_cpu(ctx->attr->data.resident.value_length);
+
+	if (offset >= data_size) {
+		/* EOF: nothing to read */
+		goto out;
+	}
+
+	/* Adjust length to not read beyond EOF */
+	if (offset + len > data_size)
+		len = data_size - offset;
+
+	if (len == 0) {
+		*rbytes = 0;
+		goto out;
+	}
+
+	rbuf = kvzalloc(len, GFP_NOFS);
+	if (!rbuf) {
+		err = -ENOMEM;
+		goto out;
+	}
+
+	attr_vi = ntfs_attr_iget(VFS_I(ni), AT_DATA, uname, uname_len);
+	if (IS_ERR(attr_vi))
+		goto out;
+
+	*rbytes = ntfs_inode_attr_pread(attr_vi, offset, len, rbuf);
+	iput(attr_vi);
+	if (*rbytes < 0)
+		goto out;
+
+	err = copy_to_user(data_buf, rbuf, *rbytes);
+	if (err)
+		err = -EFAULT;
+
+out:
+	kvfree(rbuf);
+	ntfs_attr_put_search_ctx(ctx);
+	mutex_unlock(&ni->mrec_lock);
+	return err;
+}
+
+/*
+ * ntfs_write_named_stream - Write data from a named $DATA stream.
+ *
+ * @ni:		NTFS inode
+ * @name:	Stream name (UTF-8)
+ * @name_len:	Length of name (bytes)
+ * @offset:	Byte offset in the stream
+ * @len:	Number of bytes to read
+ * @argp:	User buffer to copy data to (__user)
+ *
+ * Return:	0 on success, negative error code otherwise.
+ *		If offset >= stream size, returns 0.
+ */
+static int ntfs_write_named_stream(struct ntfs_inode *ni, __le16 *uname,
+		u32 uname_len, u64 offset, u64 len, void __user *data_buf,
+		u64 *wbytes)
+{
+	struct ntfs_attr_search_ctx *ctx;
+	struct inode *attr_vi;
+	int err;
+	char *data_stream;
+
+	if (!ni || !uname || uname_len == 0 || !data_buf)
+		return -EINVAL;
+
+	data_stream = kvmalloc(len, GFP_KERNEL);
+	if (!data_stream)
+		return -ENOMEM;
+
+	if (copy_from_user(data_stream, data_buf, len)) {
+		kvfree(data_stream);
+		return -EFAULT;
+	}
+
+	mutex_lock(&ni->mrec_lock);
+	ctx = ntfs_attr_get_search_ctx(ni, NULL);
+	if (!ctx) {
+		err = -ENOMEM;
+		goto out;
+	}
+
+	err = ntfs_attr_lookup(AT_DATA, uname, uname_len, CASE_SENSITIVE, 0,
+			NULL, 0, ctx);
+	if (err) {
+		err = ntfs_attr_add(ni, AT_DATA, uname, uname_len, NULL, 0);
+		if (err)
+			goto out;
+		mark_mft_record_dirty(ni);
+	}
+
+	attr_vi = ntfs_attr_iget(VFS_I(ni), AT_DATA, uname, uname_len);
+	if (IS_ERR(attr_vi))
+		goto out;
+
+	*wbytes = ntfs_inode_attr_pwrite(attr_vi, offset, len, data_stream,
+			false);
+	if (*wbytes < 0)
+		err = *wbytes;
+	iput(attr_vi);
+
+out:
+	kvfree(data_stream);
+	if (ctx)
+		ntfs_attr_put_search_ctx(ctx);
+	mutex_unlock(&ni->mrec_lock);
+	return err;
+}
+
+/*
+ * ntfs_remove_named_stream - Remove a named $DATA stream.
+ *
+ * @ni:		NTFS inode
+ * @name:	Stream name
+ * @name_len:	Name length
+ *
+ * Return:	0 on success, negative error
+ *              -ENOENT if stream not found
+ */
+static int ntfs_remove_named_stream(struct ntfs_inode *ni, __le16 *uname,
+		u32 uname_len)
+{
+	int err;
+
+	if (!ni || !uname || uname_len == 0)
+		return -EINVAL;
+
+	mutex_lock(&ni->mrec_lock);
+	err = ntfs_attr_remove(ni, AT_DATA, uname, uname_len);
+	mutex_unlock(&ni->mrec_lock);
+
+	return err;
+}
+
+static long ntfs_ioctl_stream(struct file *filp, unsigned long arg)
+{
+	struct inode *inode = file_inode(filp);
+	struct ntfs_inode *ni = NTFS_I(inode);
+	struct ntfs_stream_req req;
+	void __user *argp = (void __user *)arg;
+	int err = 0;
+	u32 uname_len;
+	char *kname;
+	__le16 *uname;
+
+	if (copy_from_user(&req, argp, sizeof(req)))
+		return -EFAULT;
+
+	if (req.name_len == 0 || req.name_len > 255)
+		return -EINVAL;
+
+	kname = kmalloc(req.name_len + 1, GFP_KERNEL);
+	if (!kname)
+		return -ENOMEM;
+
+	if (copy_from_user(kname, req.name, req.name_len)) {
+		err = -EFAULT;
+		goto out_free;
+	}
+	kname[req.name_len] = '\0';
+
+	uname_len = ntfs_nlstoucs(ni->vol, kname, req.name_len, &uname,
+			NTFS_MAX_NAME_LEN);
+	if (uname_len < 0) {
+		err = uname_len;
+		goto out_free;
+	}
+
+	switch (req.flags) {
+	case NTFS_STREAM_GET_SIZE:
+		err = ntfs_get_stream_size(ni, uname, uname_len,
+					   &req.result_size);
+		if(!err) {
+			if (copy_to_user(&((struct ntfs_stream_req __user *)argp)->result_size,
+					 &req.result_size, sizeof(__u64)))
+				err = -EFAULT;
+		}
+		break;
+	case NTFS_STREAM_READ:
+		if (req.length == 0 || req.data == NULL) {
+			err = -EINVAL;
+			break;
+		}
+
+		err = ntfs_read_named_stream(ni, uname, uname_len,
+					     req.offset, req.length, req.data,
+					     &req.result_size);
+		if (!err) {
+			if (copy_to_user(&((struct ntfs_stream_req __user *)argp)->result_size,
+					 &req.result_size, sizeof(__u64)))
+				err = -EFAULT;
+		}
+		break;
+	case NTFS_STREAM_WRITE:
+		if (req.length == 0 || req.data == NULL) {
+			err = -EINVAL;
+			break;
+		}
+
+		err = ntfs_write_named_stream(ni, uname, uname_len,
+					      req.offset, req.length, req.data,
+					      &req.result_size);
+		if (!err) {
+			if (copy_to_user(&((struct ntfs_stream_req __user *)argp)->result_size,
+						&req.result_size, sizeof(__u64)))
+				err = -EFAULT;
+		}
+		break;
+	case NTFS_STREAM_REMOVE:
+		err = ntfs_remove_named_stream(ni, uname, uname_len);
+		break;
+	default:
+		err = -ENOTTY;
+	}
+
+out_free:
+	kfree(kname);
+	return err;
+}
+
 long ntfs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
 	switch (cmd) {
@@ -942,6 +1250,8 @@ long ntfs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		return ntfs_ioctl_set_volume_label(filp, arg);
 	case FITRIM:
 		return ntfs_ioctl_fitrim(NTFS_SB(file_inode(filp)->i_sb), arg);
+	case NTFS_IOC_STREAM:
+		return ntfs_ioctl_stream(filp, arg);
 	default:
 		return -ENOTTY;
 	}
