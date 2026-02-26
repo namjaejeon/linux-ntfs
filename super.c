@@ -1443,7 +1443,7 @@ read_partial_upcase_page:
 		kunmap(page);
 		put_page(page);
 #endif
-	};
+	}
 	if (size == PAGE_SIZE) {
 		size = i_size & ~PAGE_MASK;
 		if (size)
