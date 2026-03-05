@@ -170,7 +170,7 @@ static int ntfs_file_fsync(struct file *filp, loff_t start, loff_t end,
 	struct inode *parent_vi, *ia_vi;
 	struct ntfs_attr_search_ctx *ctx;
 
-	ntfs_debug("Entering for inode 0x%lx.", vi->i_ino);
+	ntfs_debug("Entering for inode 0x%llx.", ni->mft_no);
 
 	if (NVolShutdown(vol))
 		return -EIO;
@@ -253,8 +253,8 @@ static int ntfs_file_fsync(struct file *filp, loff_t start, loff_t end,
 		ntfs_debug("Done.");
 	else
 		ntfs_warning(vi->i_sb,
-				"Failed to f%ssync inode 0x%lx.  Error %u.",
-				datasync ? "data" : "", vi->i_ino, -ret);
+				"Failed to f%ssync inode 0x%llx.  Error %u.",
+				datasync ? "data" : "", ni->mft_no, -ret);
 	if (!ret)
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 12, 0)
 		blkdev_issue_flush(vi->i_sb->s_bdev);
