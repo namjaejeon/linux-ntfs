@@ -726,15 +726,17 @@ static int ntfs_read_locked_inode(struct inode *vi)
 
 	if (uid_valid(vol->uid)) {
 		vi->i_uid = vol->uid;
-		flags |= NTFS_VOL_UID;
-	} else
+	} else {
 		vi->i_uid = GLOBAL_ROOT_UID;
+		flags |= NTFS_VOL_UID;
+	}
 
 	if (gid_valid(vol->gid)) {
 		vi->i_gid = vol->gid;
-		flags |= NTFS_VOL_GID;
-	} else
+	} else {
 		vi->i_gid = GLOBAL_ROOT_GID;
+		flags |= NTFS_VOL_GID;
+	}
 
 	vi->i_mode = 0777;
 
@@ -917,10 +919,10 @@ static int ntfs_read_locked_inode(struct inode *vi)
 	}
 skip_attr_list_load:
 	err = ntfs_attr_lookup(AT_EA_INFORMATION, NULL, 0, 0, 0, NULL, 0, ctx);
-	if (!err)
+	if (!err) {
 		NInoSetHasEA(ni);
-
-	ntfs_ea_get_wsl_inode(vi, &dev, flags);
+		ntfs_ea_get_wsl_inode(vi, &dev, flags);
+	}
 
 	if (m->flags & MFT_RECORD_IS_DIRECTORY) {
 		vi->i_mode |= S_IFDIR;
