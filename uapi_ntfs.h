@@ -31,18 +31,18 @@
  * @reserved:		Reserved.
  * @name_len:		Stream name length.
  * @data_size:		Stream size.
- * @name:		Stream name.
- * @data:		named stream data.
+ * @name:		Stream name pointer.
+ * @data:		named stream data pointer.
  */
-struct ntfs_stream_req {
+struct ntfs_stream {
 	__u64 offset;
 	__u64 length;
 	__u32 flags;
 	__u64 result_size;
 	__u32 reserved;
 	__u32 name_len;
-	const char __user *name;
-	void __user *data;
+	__u64 name;
+	__u64 data;
 };
 
 /*

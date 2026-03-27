@@ -930,6 +930,8 @@ static int ntfs_ioctl_fitrim(struct ntfs_volume *vol, unsigned long arg)
 	return 0;
 }
 
+#define NTFS_STREAM_MAX_IO	(16 * 1024 * 1024) /* 16MB limit */
+
 /*
  * ntfs_read_named_stream - Read data from a named $DATA stream.
  *
@@ -956,6 +958,9 @@ static int ntfs_read_named_stream(struct ntfs_inode *ni, __le16 *uname,
 	if (!ni || !uname || uname_len == 0)
 		return -EINVAL;
 
+	if (len == 0 || len > NTFS_STREAM_MAX_IO)
+		return -EINVAL;
+
 	mutex_lock(&ni->mrec_lock);
 	ctx = ntfs_attr_get_search_ctx(ni, NULL);
 	if (!ctx) {
@@ -966,7 +971,7 @@ static int ntfs_read_named_stream(struct ntfs_inode *ni, __le16 *uname,
 	err = ntfs_attr_lookup(AT_DATA, uname, uname_len, CASE_SENSITIVE, 0,
 			NULL, 0, ctx);
 	if (err)
-		goto out;
+		goto out_lock;
 
 	if (ctx->attr->non_resident)
 		data_size = le64_to_cpu(ctx->attr->data.non_resident.data_size);
@@ -974,40 +979,44 @@ static int ntfs_read_named_stream(struct ntfs_inode *ni, __le16 *uname,
 		data_size = le32_to_cpu(ctx->attr->data.resident.value_length);
 
 	if (offset >= data_size) {
+		*rbytes = 0;
 		/* EOF: nothing to read */
-		goto out;
+		goto out_lock;
 	}
 
 	/* Adjust length to not read beyond EOF */
-	if (offset + len > data_size)
+	if (len > data_size - offset)
 		len = data_size - offset;
 
-	if (len == 0) {
-		*rbytes = 0;
+	attr_vi = ntfs_attr_iget(VFS_I(ni), AT_DATA, uname, uname_len);
+	ntfs_attr_put_search_ctx(ctx);
+	mutex_unlock(&ni->mrec_lock);
+
+	if (IS_ERR(attr_vi))
 		goto out;
-	}
 
 	rbuf = kvzalloc(len, GFP_NOFS);
 	if (!rbuf) {
 		err = -ENOMEM;
+		iput(attr_vi);
 		goto out;
 	}
 
-	attr_vi = ntfs_attr_iget(VFS_I(ni), AT_DATA, uname, uname_len);
-	if (IS_ERR(attr_vi))
-		goto out;
-
 	*rbytes = ntfs_inode_attr_pread(attr_vi, offset, len, rbuf);
 	iput(attr_vi);
-	if (*rbytes < 0)
-		goto out;
+	if (*rbytes < 0) {
+		err = *rbytes;
+		goto out_free;
+	}
 
-	err = copy_to_user(data_buf, rbuf, *rbytes);
-	if (err)
+	if (copy_to_user(data_buf, rbuf, *rbytes))
 		err = -EFAULT;
 
-out:
+out_free:
 	kvfree(rbuf);
+	return err;
+
+out:
 	ntfs_attr_put_search_ctx(ctx);
 	mutex_unlock(&ni->mrec_lock);
 	return err;
@@ -1038,6 +1047,9 @@ static int ntfs_write_named_stream(struct ntfs_inode *ni, __le16 *uname,
 	if (!ni || !uname || uname_len == 0 || !data_buf)
 		return -EINVAL;
 
+	if (len == 0 || len > NTFS_STREAM_MAX_IO)
+		return -EINVAL;
+
 	data_stream = kvmalloc(len, GFP_KERNEL);
 	if (!data_stream)
 		return -ENOMEM;
@@ -1051,7 +1063,7 @@ static int ntfs_write_named_stream(struct ntfs_inode *ni, __le16 *uname,
 	ctx = ntfs_attr_get_search_ctx(ni, NULL);
 	if (!ctx) {
 		err = -ENOMEM;
-		goto out;
+		goto out_lock;
 	}
 
 	err = ntfs_attr_lookup(AT_DATA, uname, uname_len, CASE_SENSITIVE, 0,
@@ -1059,13 +1071,18 @@ static int ntfs_write_named_stream(struct ntfs_inode *ni, __le16 *uname,
 	if (err) {
 		err = ntfs_attr_add(ni, AT_DATA, uname, uname_len, NULL, 0);
 		if (err)
-			goto out;
+			goto out_unlock;
 		mark_mft_record_dirty(ni);
 	}
 
 	attr_vi = ntfs_attr_iget(VFS_I(ni), AT_DATA, uname, uname_len);
-	if (IS_ERR(attr_vi))
-		goto out;
+	ntfs_attr_put_search_ctx(ctx);
+	mutex_unlock(&ni->mrec_lock);
+
+	if (IS_ERR(attr_vi)) {
+		err = PTR_ERR(attr_vi);
+		goto out_free;
+	}
 
 	*wbytes = ntfs_inode_attr_pwrite(attr_vi, offset, len, data_stream,
 			false);
@@ -1073,12 +1090,15 @@ static int ntfs_write_named_stream(struct ntfs_inode *ni, __le16 *uname,
 		err = *wbytes;
 	iput(attr_vi);
 
-out:
+out_free:
 	kvfree(data_stream);
+	return err;
+
+out_unlock:
 	if (ctx)
 		ntfs_attr_put_search_ctx(ctx);
 	mutex_unlock(&ni->mrec_lock);
-	return err;
+	goto out_free;
 }
 
 /*
@@ -1120,14 +1140,20 @@ static long ntfs_ioctl_stream(struct file *filp, unsigned long arg)
 	if (copy_from_user(&req, argp, sizeof(req)))
 		return -EFAULT;
 
-	if (req.name_len == 0 || req.name_len > 255)
+	req.result_size = 0;
+
+	if (!access_ok((void __user *)(uintptr_t)req.name, req.name_len))
+		return -EFAULT;
+
+	if (req.length > NTFS_STREAM_MAX_IO)
 		return -EINVAL;
 
 	kname = kmalloc(req.name_len + 1, GFP_KERNEL);
 	if (!kname)
 		return -ENOMEM;
 
-	if (copy_from_user(kname, req.name, req.name_len)) {
+	if (copy_from_user(kname, (void __user *)(uintptr_t)req.name,
+			   req.name_len)) {
 		err = -EFAULT;
 		goto out_free;
 	}
@@ -1148,7 +1174,8 @@ static long ntfs_ioctl_stream(struct file *filp, unsigned long arg)
 		}
 
 		err = ntfs_read_named_stream(ni, uname, uname_len,
-					     req.offset, req.length, req.data,
+					     req.offset, req.length,
+					     (void __user *)(uintptr_t)req.data,
 					     &req.result_size);
 		if (!err) {
 			if (copy_to_user(&((struct ntfs_stream_req __user *)argp)->result_size,
@@ -1163,7 +1190,8 @@ static long ntfs_ioctl_stream(struct file *filp, unsigned long arg)
 		}
 
 		err = ntfs_write_named_stream(ni, uname, uname_len,
-					      req.offset, req.length, req.data,
+					      req.offset, req.length,
+					      (void __user *)(uintptr_t)req.data,
 					      &req.result_size);
 		if (!err) {
 			if (copy_to_user(&((struct ntfs_stream_req __user *)argp)->result_size,
