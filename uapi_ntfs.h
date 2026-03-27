@@ -51,7 +51,6 @@ struct ntfs_stream_req {
 enum {
 	NTFS_STREAM_READ	= 0,
 	NTFS_STREAM_WRITE,
-	NTFS_STREAM_GET_SIZE,
 	NTFS_STREAM_REMOVE
 };
 
