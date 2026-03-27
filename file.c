@@ -995,7 +995,6 @@ static int ntfs_read_named_stream(struct ntfs_inode *ni, __le16 *uname,
 	struct inode *attr_vi;
 	int err;
 	u64 data_size;
-	u64 read_bytes = 0;
 	char *rbuf = NULL;
 
 	if (!ni || !uname || uname_len == 0)
@@ -1151,6 +1150,125 @@ static int ntfs_remove_named_stream(struct ntfs_inode *ni, __le16 *uname,
 	return err;
 }
 
+static int ntfs_ioctl_list_streams(struct file *filp, unsigned long arg)
+{
+	struct inode *inode = file_inode(filp);
+	struct ntfs_inode *ni = NTFS_I(inode);
+	struct ntfs_list_streams hdr;
+	struct ntfs_stream_entry *entry;
+	size_t required = 0;
+	void __user *ubuf;
+	struct attr_record *a;
+	struct ntfs_attr_search_ctx *actx;
+	int ret = 0, err, count = 0;
+	size_t entry_size, offset = 0;
+	unsigned int name_len;
+	unsigned char *sn;
+
+	if (copy_from_user(&hdr, (void __user *)arg, sizeof(hdr)))
+		return -EFAULT;
+
+	ubuf = (void __user *)arg + sizeof(hdr);
+
+	actx = ntfs_attr_get_search_ctx(ni, NULL);
+	if (!actx)
+		return -ENOMEM;
+
+	while ((err = ntfs_attr_lookup(AT_DATA, AT_UNNAMED, 0, CASE_SENSITIVE,
+                                0, NULL, 0, actx)) == 0) {
+		a = actx->attr;
+		if (!a->name_length)
+			continue;
+
+		sn = ntfs_attr_name_get(ni->vol,
+				(__le16 *)((u8 *)a + le16_to_cpu(a->name_offset)),
+				a->name_length);
+		name_len = strlen(sn);
+		ntfs_debug("stream name: %s, length : %u\n", sn, name_len);
+		ntfs_attr_name_free(&sn);
+
+		entry_size = sizeof(*entry) + name_len;
+		entry_size = ALIGN(entry_size, 8);
+
+		required += entry_size;
+		count++;
+	}
+
+	hdr.stream_count = count;
+	hdr.bytes_returned = required;
+	
+	if (!count)
+		goto to_user;
+
+	if (hdr.buffer_size < required) {
+		if (copy_to_user((void __user *)arg, &hdr, sizeof(hdr)))
+			ret = -EFAULT;
+		else
+			ret = -ENOSPC;
+		goto out;
+	}
+
+	ntfs_attr_reinit_search_ctx(actx);
+	while ((err = ntfs_attr_lookup(AT_DATA, AT_UNNAMED, 0, CASE_SENSITIVE,
+                                0, NULL, 0, actx)) == 0) {
+		unsigned char *sn;
+
+		a = actx->attr;
+		if (!a->name_length)
+			continue;
+		sn = ntfs_attr_name_get(ni->vol,
+				(__le16 *)((u8 *)a + le16_to_cpu(a->name_offset)),
+				a->name_length);
+		name_len = strlen(sn);
+		ntfs_debug("stream name: %s, length : %u\n", sn, name_len);
+		ntfs_attr_name_free(&sn);
+
+		entry = kzalloc(sizeof(*entry) + a->name_length, GFP_KERNEL);
+		if (!entry) {
+			ret = -ENOMEM;
+			ntfs_attr_name_free(&sn);
+			goto out;
+		}
+
+		if (a->non_resident) {
+			entry->size = le64_to_cpu(a->data.non_resident.data_size);
+			entry->alloc_size =
+				le64_to_cpu(a->data.non_resident.allocated_size);
+
+		} else {
+			entry->size = le32_to_cpu(a->data.resident.value_length);
+			entry->alloc_size = le32_to_cpu(a->length) -
+				le16_to_cpu(a->data.resident.value_offset);
+		}
+
+		entry->name_len = name_len;
+		memcpy(entry->name, sn, name_len);
+
+		entry_size = sizeof(*entry) + name_len;
+		entry_size = ALIGN(entry_size, 8);
+
+		if (copy_to_user(ubuf + offset, entry, entry_size)) {
+			kfree(entry);
+			ntfs_attr_name_free(&sn);
+			ret = -EFAULT;
+			goto out;
+		}
+
+		offset += entry_size;
+		ntfs_attr_name_free(&sn);
+		kfree(entry);
+	}
+
+to_user:
+	if (copy_to_user((void __user *)arg, &hdr, sizeof(hdr)))
+		ret = -EFAULT;
+
+out:
+        ntfs_attr_put_search_ctx(actx);
+
+	return ret;
+}
+
 static long ntfs_ioctl_stream(struct file *filp, unsigned long arg)
 {
 	struct inode *inode = file_inode(filp);
@@ -1252,6 +1370,8 @@ long ntfs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		return ntfs_ioctl_fitrim(NTFS_SB(file_inode(filp)->i_sb), arg);
 	case NTFS_IOC_STREAM:
 		return ntfs_ioctl_stream(filp, arg);
+	case NTFS_IOC_LIST_STREAMS:
+		return ntfs_ioctl_list_streams(filp, arg);
 	default:
 		return -ENOTTY;
 	}

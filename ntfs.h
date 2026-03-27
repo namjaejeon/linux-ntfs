@@ -307,17 +307,10 @@ int ntfs_bdev_write(struct super_block *sb, void *buf, loff_t start, size_t size
 #define FS_STREAM_NAME_MAX 255
 
 struct ntfs_stream_entry {
-	u64 size;	/* logical size */
+	u64 size;	/* stream data size */
 	u64 alloc_size; /* allocated size */
 	u32 name_len;   /* name length in bytes (not null included) */
 	char name[];
-}
-
-struct ntfs_ioc_list_streams {
-	u64 buffer_size;	/* in: user buffer size */
-	u64 bytes_returned;     /* out: acutal bytes written */
-	u64 stream_count;	/* out: number of streams */
-	char buffer[];		/* ntfs_stream_entry array */
-}
+};
 
 #endif /* _LINUX_NTFS_H */

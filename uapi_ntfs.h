@@ -55,6 +55,22 @@ enum {
 	NTFS_STREAM_REMOVE
 };
 
+/*
+ * ntfs list streams ioctl structure.
+ *
+ * @buffer_size:	user buffer size(in).
+ * @bytes_returned:	acutal bytes written(out).
+ * @stream_count:	number of streams(out).
+ * @buffer:		ntfs_stream_entry array.
+ */
+struct ntfs_list_streams {
+	u64 buffer_size;
+	u64 bytes_returned;
+	u64 stream_count;
+	char buffer[];
+};
+
 #define NTFS_IOC_STREAM			_IOWR(NTFS_IOC_MAGIC, 1, struct ntfs_stream_req)
+#define NTFS_IOC_LIST_STREAMS		_IOWR(NTFS_IOC_MAGIC, 2, struct ntfs_list_streams)
 
 #endif /* _UAPI_LINUX_NTFS_H */
