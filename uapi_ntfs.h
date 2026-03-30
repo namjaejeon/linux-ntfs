@@ -25,24 +25,20 @@
 /*
  * ntfs named stream ioctl structure.
  *
- * @offset:		Start offset in stream.
- * @length:		Byte length to read/write.
- * @flags:		flags.
- * @reserved:		Reserved.
+ * @offset:		Offset within the named stream.
+ * @length:		Number of bytes to read/write.
+ * @flags:		NTFS_STREAM_{READ,WRITE,REMOVE}.
+ * @result_size:	Actual bytes transferred.
  * @name_len:		Stream name length.
- * @data_size:		Stream size.
- * @name:		Stream name pointer.
- * @data:		named stream data pointer.
+ * @buffer:		Stream name and data pointer.
  */
 struct ntfs_stream {
-	__u64 offset;
-	__u64 length;
+	__u64 stream_offset;
+	__u64 io_len;
 	__u32 flags;
 	__u64 result_size;
-	__u32 reserved;
 	__u32 name_len;
-	__u64 name;
-	__u64 data;
+	__u8 buffer[]; /* name + data */
 };
 
 /*
@@ -69,7 +65,7 @@ struct ntfs_list_streams {
 	char buffer[];
 };
 
-#define NTFS_IOC_STREAM			_IOWR(NTFS_IOC_MAGIC, 1, struct ntfs_stream_req)
+#define NTFS_IOC_STREAM			_IOWR(NTFS_IOC_MAGIC, 1, struct ntfs_stream)
 #define NTFS_IOC_LIST_STREAMS		_IOWR(NTFS_IOC_MAGIC, 2, struct ntfs_list_streams)
 
 #endif /* _UAPI_LINUX_NTFS_H */
