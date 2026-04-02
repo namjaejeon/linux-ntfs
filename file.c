@@ -1033,21 +1033,24 @@ static int ntfs_punch_hole(struct ntfs_inode *ni, int mode, loff_t offset,
 	if (offset & vol->cluster_size_mask) {
 		loff_t to;
 
-		to = min_t(loff_t, ntfs_cluster_to_bytes(vol, start_vcn + 1),
-				end_offset);
+		if (offset < ni->initialized_size) {
+			to = min_t(loff_t,
+				   ntfs_cluster_to_bytes(vol, start_vcn + 1),
+				   end_offset);
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
-		err = iomap_zero_range(vi, offset, to - offset, NULL,
-				&ntfs_seek_iomap_ops,
-				&ntfs_iomap_folio_ops, NULL);
+			err = iomap_zero_range(vi, offset, to - offset, NULL,
+					       &ntfs_seek_iomap_ops,
+					       &ntfs_iomap_folio_ops, NULL);
 #else
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 15, 0)
-		err = iomap_zero_range(vi, offset, to - offset, NULL,
-				&ntfs_seek_iomap_ops, NULL);
+			err = iomap_zero_range(vi, offset, to - offset, NULL,
+					       &ntfs_seek_iomap_ops, NULL);
 #else
-		err = iomap_zero_range(vi, offset, to - offset, NULL,
-				&ntfs_seek_iomap_ops);
+			err = iomap_zero_range(vi, offset, to - offset, NULL,
+					       &ntfs_seek_iomap_ops);
 #endif
 #endif
+		}
 		if (err < 0 || (end_vcn - start_vcn) == 1)
 			goto out;
 		start_vcn++;
@@ -1057,19 +1060,22 @@ static int ntfs_punch_hole(struct ntfs_inode *ni, int mode, loff_t offset,
 		loff_t from;
 
 		from = ntfs_cluster_to_bytes(vol, end_vcn - 1);
+		if (from < ni->initialized_size) {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
-		err = iomap_zero_range(vi, from, end_offset - from, NULL,
-				&ntfs_seek_iomap_ops,
-				&ntfs_iomap_folio_ops, NULL);
+			err = iomap_zero_range(vi, from, end_offset - from,
+					       NULL, &ntfs_seek_iomap_ops,
+					       &ntfs_iomap_folio_ops, NULL);
 #else
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 15, 0)
-		err = iomap_zero_range(vi, from, end_offset - from, NULL,
-				&ntfs_seek_iomap_ops, NULL);
+			err = iomap_zero_range(vi, from, end_offset - from,
+					       NULL, &ntfs_seek_iomap_ops,
+					       NULL);
 #else
-		err = iomap_zero_range(vi, from, end_offset - from, NULL,
-				&ntfs_seek_iomap_ops);
+			err = iomap_zero_range(vi, from, end_offset - from,
+					       NULL, &ntfs_seek_iomap_ops);
 #endif
 #endif
+		}
 		if (err < 0 || (end_vcn - start_vcn) == 1)
 			goto out;
 		end_vcn--;
