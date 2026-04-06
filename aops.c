@@ -536,7 +536,9 @@ const struct address_space_operations ntfs_aops = {
 	.writepage		= ntfs_writepage,
 #endif
 	.writepages		= ntfs_writepages,
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 5, 0)
 	.direct_IO		= noop_direct_IO,
+#endif
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
 	.dirty_folio		= iomap_dirty_folio,
 #else
