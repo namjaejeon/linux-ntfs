@@ -30,6 +30,13 @@
 __le16 AT_UNNAMED[] = { cpu_to_le16('\0') };
 
 /*
+ * Maximum size allowed for reading attributes by ntfs_attr_readall().
+ * Extended attribute, reparse point are not expected to be larger than this size.
+ */
+
+#define NTFS_ATTR_READALL_MAX_SIZE	(64 * 1024)
+
+/*
  * ntfs_map_runlist_nolock - map (a part of) a runlist of an ntfs inode
  * @ni:		ntfs inode for which to map (part of) a runlist
  * @vcn:	map runlist part containing this vcn
@@ -384,7 +391,7 @@ s64 ntfs_attr_vcn_to_lcn_nolock(struct ntfs_inode *ni, const s64 vcn,
 	unsigned long flags;
 	bool is_retry = false;
 
-	ntfs_debug("Entering for i_ino 0x%lx, vcn 0x%llx, %s_locked.",
+	ntfs_debug("Entering for i_ino 0x%llx, vcn 0x%llx, %s_locked.",
 			ni->mft_no, (unsigned long long)vcn,
 			write_locked ? "write" : "read");
 	if (!ni->runlist.rl) {
@@ -535,7 +542,7 @@ struct runlist_element *ntfs_attr_find_vcn_nolock(struct ntfs_inode *ni, const s
 	int err = 0;
 	bool is_retry = false;
 
-	ntfs_debug("Entering for i_ino 0x%lx, vcn 0x%llx, with%s ctx.",
+	ntfs_debug("Entering for i_ino 0x%llx, vcn 0x%llx, with%s ctx.",
 			ni->mft_no, (unsigned long long)vcn, ctx ? "" : "out");
 	if (!ni->runlist.rl) {
 		read_lock_irqsave(&ni->size_lock, flags);
@@ -582,6 +589,35 @@ retry_remap:
 	if (err != -ENOENT)
 		ntfs_error(ni->vol->sb, "Failed with error code %i.", err);
 	return ERR_PTR(err);
+}
+
+static u32 ntfs_resident_attr_min_value_length(const __le32 type)
+{
+	switch (type) {
+	case AT_STANDARD_INFORMATION:
+		return offsetof(struct standard_information, ver) +
+		       sizeof(((struct standard_information *)0)->ver.v1.reserved12);
+	case AT_ATTRIBUTE_LIST:
+		return offsetof(struct attr_list_entry, name);
+	case AT_FILE_NAME:
+		return offsetof(struct file_name_attr, file_name);
+	case AT_OBJECT_ID:
+		return sizeof(struct guid);
+	case AT_SECURITY_DESCRIPTOR:
+		return sizeof(struct security_descriptor_relative);
+	case AT_VOLUME_INFORMATION:
+		return sizeof(struct volume_information);
+	case AT_INDEX_ROOT:
+		return sizeof(struct index_root);
+	case AT_REPARSE_POINT:
+		return offsetof(struct reparse_point, reparse_data);
+	case AT_EA_INFORMATION:
+		return sizeof(struct ea_information);
+	case AT_EA:
+		return offsetof(struct ea_attr, ea_name) + 1;
+	default:
+		return 0;
+	}
 }
 
 /*
@@ -693,8 +729,8 @@ static int ntfs_attr_find(const __le32 type, const __le16 *name,
 			if (a->name_length && ((le16_to_cpu(a->name_offset) +
 					       a->name_length * sizeof(__le16)) >
 						le32_to_cpu(a->length))) {
-				ntfs_error(vol->sb, "Corrupt attribute name in MFT record %lld\n",
-					   (long long)ctx->ntfs_ino->mft_no);
+				ntfs_error(vol->sb, "Corrupt attribute name in MFT record %llu\n",
+					   ctx->ntfs_ino->mft_no);
 				break;
 			}
 
@@ -726,38 +762,69 @@ static int ntfs_attr_find(const __le32 type, const __le16 *name,
 					continue;
 			}
 		}
+
+		 /* Validate attribute's value offset/length */
+		if (!a->non_resident) {
+			u32 min_len;
+			u32 value_length = le32_to_cpu(a->data.resident.value_length);
+			u16 value_offset = le16_to_cpu(a->data.resident.value_offset);
+
+			if (value_length > le32_to_cpu(a->length) ||
+			    value_offset > le32_to_cpu(a->length) - value_length)
+				break;
+
+			min_len = ntfs_resident_attr_min_value_length(a->type);
+			if (min_len && value_length < min_len) {
+				ntfs_error(vol->sb,
+					   "Too small %#x resident attribute value in MFT record %lld\n",
+					   le32_to_cpu(a->type), (long long)ctx->ntfs_ino->mft_no);
+				break;
+			}
+		} else {
+			u32 min_len;
+			u16 mp_offset;
+
+			min_len = offsetof(struct attr_record, data.non_resident.initialized_size) +
+				  sizeof(a->data.non_resident.initialized_size);
+			if (le32_to_cpu(a->length) < min_len)
+				break;
+
+			mp_offset = le16_to_cpu(a->data.non_resident.mapping_pairs_offset);
+			if (mp_offset < min_len ||
+			    mp_offset > le32_to_cpu(a->length))
+				break;
+		}
+
 		/*
 		 * The names match or @name not present and attribute is
 		 * unnamed.  If no @val specified, we have found the attribute
 		 * and are done.
 		 */
-		if (!val)
+		if (!val || a->non_resident)
 			return 0;
 		/* @val is present; compare values. */
 		else {
-			register int rc;
+			u32 value_length = le32_to_cpu(a->data.resident.value_length);
+			int rc;
 
 			rc = memcmp(val, (u8 *)a + le16_to_cpu(
 					a->data.resident.value_offset),
-					min_t(u32, val_len, le32_to_cpu(
-					a->data.resident.value_length)));
+					min_t(u32, val_len, value_length));
 			/*
 			 * If @val collates before the current attribute's
 			 * value, there is no matching attribute.
 			 */
 			if (!rc) {
-				register u32 avl;
-
-				avl = le32_to_cpu(a->data.resident.value_length);
-				if (val_len == avl)
+				if (val_len == value_length)
 					return 0;
-				if (val_len < avl)
+				if (val_len < value_length)
 					return -ENOENT;
 			} else if (rc < 0)
 				return -ENOENT;
 		}
 	}
-	ntfs_error(vol->sb, "Inode is corrupt.  Run chkdsk.");
+	ntfs_error(vol->sb, "mft %#llx, type %#x is corrupt. Run chkdsk.",
+		   (long long)ctx->ntfs_ino->mft_no, le32_to_cpu(type));
 	NVolSetErrors(vol);
 	return -EIO;
 }
@@ -804,7 +871,7 @@ int load_attribute_list(struct ntfs_inode *base_ni, u8 *al_start, const s64 size
 	attr_vi = ntfs_attr_iget(VFS_I(base_ni), AT_ATTRIBUTE_LIST, AT_UNNAMED, 0);
 	if (IS_ERR(attr_vi)) {
 		ntfs_error(base_ni->vol->sb,
-			   "Failed to open an inode for Attribute list, mft = %ld",
+			   "Failed to open an inode for Attribute list, mft = %llu",
 			   base_ni->mft_no);
 		return PTR_ERR(attr_vi);
 	}
@@ -812,7 +879,7 @@ int load_attribute_list(struct ntfs_inode *base_ni, u8 *al_start, const s64 size
 	if (ntfs_inode_attr_pread(attr_vi, 0, size, al_start) != size) {
 		iput(attr_vi);
 		ntfs_error(base_ni->vol->sb,
-			   "Failed to read attribute list, mft = %ld",
+			   "Failed to read attribute list, mft = %llu",
 			   base_ni->mft_no);
 		return -EIO;
 	}
@@ -831,7 +898,7 @@ int load_attribute_list(struct ntfs_inode *base_ni, u8 *al_start, const s64 size
 			break;
 	}
 	if (al != al_start + size) {
-		ntfs_error(base_ni->vol->sb, "Corrupt attribute list, mft = %ld",
+		ntfs_error(base_ni->vol->sb, "Corrupt attribute list, mft = %llu",
 			   base_ni->mft_no);
 		return -EIO;
 	}
@@ -900,11 +967,12 @@ static int ntfs_external_attr_find(const __le32 type,
 	struct attr_record *a;
 	__le16 *al_name;
 	u32 al_name_len;
+	u32 attr_len, mft_free_len;
 	bool is_first_search = false;
 	int err = 0;
 	static const char *es = " Unmount and run chkdsk.";
 
-	ntfs_debug("Entering for inode 0x%lx, type 0x%x.", ni->mft_no, type);
+	ntfs_debug("Entering for inode 0x%llx, type 0x%x.", ni->mft_no, type);
 	if (!base_ni) {
 		/* First call happens with the base mft record. */
 		base_ni = ctx->base_ntfs_ino = ctx->ntfs_ino;
@@ -1104,7 +1172,7 @@ is_enumeration:
 		if (MREF_LE(al_entry->mft_reference) == ni->mft_no) {
 			if (MSEQNO_LE(al_entry->mft_reference) != ni->seq_no) {
 				ntfs_error(vol->sb,
-					"Found stale mft reference in attribute list of base inode 0x%lx.%s",
+					"Found stale mft reference in attribute list of base inode 0x%llx.%s",
 					base_ni->mft_no, es);
 				err = -EIO;
 				break;
@@ -1126,7 +1194,7 @@ is_enumeration:
 						al_entry->mft_reference), &ni);
 				if (IS_ERR(ctx->mrec)) {
 					ntfs_error(vol->sb,
-							"Failed to map extent mft record 0x%lx of base inode 0x%lx.%s",
+							"Failed to map extent mft record 0x%lx of base inode 0x%llx.%s",
 							MREF_LE(al_entry->mft_reference),
 							base_ni->mft_no, es);
 					err = PTR_ERR(ctx->mrec);
@@ -1163,13 +1231,23 @@ is_enumeration:
 		 * with the same meanings as above.
 		 */
 do_next_attr_loop:
-		if ((u8 *)a < (u8 *)ctx->mrec || (u8 *)a > (u8 *)ctx->mrec +
-				le32_to_cpu(ctx->mrec->bytes_allocated))
+		if ((u8 *)a < (u8 *)ctx->mrec ||
+		    (u8 *)a >= (u8 *)ctx->mrec + le32_to_cpu(ctx->mrec->bytes_allocated) ||
+		    (u8 *)a >= (u8 *)ctx->mrec + le32_to_cpu(ctx->mrec->bytes_in_use))
 			break;
-		if (a->type == AT_END)
+
+		mft_free_len = le32_to_cpu(ctx->mrec->bytes_in_use) -
+			       ((u8 *)a - (u8 *)ctx->mrec);
+		if (mft_free_len >= sizeof(a->type) && a->type == AT_END)
 			continue;
-		if (!a->length)
+
+		attr_len = le32_to_cpu(a->length);
+		if (!attr_len ||
+		    attr_len < offsetof(struct attr_record, data.resident.reserved) +
+		    sizeof(a->data.resident.reserved) ||
+		    attr_len > mft_free_len)
 			break;
+
 		if (al_entry->instance != a->instance)
 			goto do_next_attr;
 		/*
@@ -1179,27 +1257,67 @@ do_next_attr_loop:
 		 */
 		if (al_entry->type != a->type)
 			break;
+		if (a->name_length && ((le16_to_cpu(a->name_offset) +
+			       a->name_length * sizeof(__le16)) > attr_len))
+			break;
 		if (!ntfs_are_names_equal((__le16 *)((u8 *)a +
 				le16_to_cpu(a->name_offset)), a->name_length,
 				al_name, al_name_len, CASE_SENSITIVE,
 				vol->upcase, vol->upcase_len))
 			break;
+
 		ctx->attr = a;
+
+		if (a->non_resident) {
+			u32 min_len;
+			u16 mp_offset;
+
+			min_len = offsetof(struct attr_record,
+					   data.non_resident.initialized_size) +
+				  sizeof(a->data.non_resident.initialized_size);
+
+			if (le32_to_cpu(a->length) < min_len)
+				break;
+
+			mp_offset =
+				le16_to_cpu(a->data.non_resident.mapping_pairs_offset);
+			if (mp_offset < min_len || mp_offset > attr_len)
+				break;
+		}
+
 		/*
 		 * If no @val specified or @val specified and it matches, we
 		 * have found it!
 		 */
-		if ((type == AT_UNUSED) || !val || (!a->non_resident && le32_to_cpu(
-				a->data.resident.value_length) == val_len &&
-				!memcmp((u8 *)a +
-				le16_to_cpu(a->data.resident.value_offset),
-				val, val_len))) {
-			ntfs_debug("Done, found.");
-			return 0;
+		if ((type == AT_UNUSED) || !val)
+			goto attr_found;
+		if (!a->non_resident) {
+			u32 value_length = le32_to_cpu(a->data.resident.value_length);
+			u16 value_offset = le16_to_cpu(a->data.resident.value_offset);
+
+			if (attr_len < offsetof(struct attr_record, data.resident.reserved) +
+					sizeof(a->data.resident.reserved))
+				break;
+			if (value_length > attr_len || value_offset > attr_len - value_length)
+				break;
+
+			value_length = ntfs_resident_attr_min_value_length(a->type);
+			if (value_length && le32_to_cpu(a->data.resident.value_length) <
+			    value_length) {
+				pr_err("Too small resident attribute value in MFT record %lld, type %#x\n",
+				       (long long)ctx->ntfs_ino->mft_no, a->type);
+				break;
+			}
+			if (value_length == val_len &&
+			    !memcmp((u8 *)a + value_offset, val, val_len)) {
+attr_found:
+				ntfs_debug("Done, found.");
+				return 0;
+			}
 		}
 do_next_attr:
 		/* Proceed to the next attribute in the current mft record. */
-		a = (struct attr_record *)((u8 *)a + le32_to_cpu(a->length));
+		a = (struct attr_record *)((u8 *)a + attr_len);
 		goto do_next_attr_loop;
 	}
 
@@ -1214,9 +1332,13 @@ corrupt:
 	}
 
 	if (!err) {
+		u64 mft_no = ctx->al_entry ? MREF_LE(ctx->al_entry->mft_reference) : 0;
+		u32 type = ctx->al_entry ? le32_to_cpu(ctx->al_entry->type) : 0;
+
 		ntfs_error(vol->sb,
-			"Base inode 0x%lx contains corrupt attribute list attribute.%s",
-			base_ni->mft_no, es);
+			"Base inode 0x%llx contains corrupt attribute, mft %#llx, type %#x. %s",
+			(long long)base_ni->mft_no, (long long)mft_no, type,
+			"Unmount and run chkdsk.");
 		err = -EIO;
 	}
 
@@ -1970,8 +2092,8 @@ undo_err_out:
 			err2 = attr_size;
 			attr_size = arec_size - mp_ofs;
 			ntfs_error(vol->sb,
-				"Failed to undo partial resident to non-resident attribute conversion.  Truncating inode 0x%lx, attribute type 0x%x from %i bytes to %i bytes to maintain metadata consistency.  THIS MEANS YOU ARE LOSING %i BYTES DATA FROM THIS %s.",
-					vi->i_ino,
+				"Failed to undo partial resident to non-resident attribute conversion.  Truncating inode 0x%llx, attribute type 0x%x from %i bytes to %i bytes to maintain metadata consistency.  THIS MEANS YOU ARE LOSING %i BYTES DATA FROM THIS %s.",
+					ni->mft_no,
 					(unsigned int)le32_to_cpu(ni->type),
 					err2, attr_size, err2 - attr_size,
 					((ni->type == AT_DATA) &&
@@ -3687,7 +3809,7 @@ retry:
 		 * delete extent) and continue search.
 		 */
 		if (finished_build) {
-			ntfs_debug("Mark attr 0x%x for delete in inode 0x%lx.\n",
+			ntfs_debug("Mark attr 0x%x for delete in inode 0x%llx.\n",
 				(unsigned int)le32_to_cpu(a->type), ctx->ntfs_ino->mft_no);
 			a->data.non_resident.highest_vcn = cpu_to_le64(NTFS_VCN_DELETE_MARK);
 			mark_mft_record_dirty(ctx->ntfs_ino);
@@ -4918,7 +5040,7 @@ int ntfs_attr_map_cluster(struct ntfs_inode *ni, s64 vcn_start, s64 *lcn_start,
 			CASE_SENSITIVE, vcn, NULL, 0, ctx);
 	if (err) {
 		ntfs_error(vol->sb,
-			   "ntfs_attr_lookup failed, ntfs inode(mft_no : %ld) type : 0x%x, err : %d",
+			   "ntfs_attr_lookup failed, ntfs inode(mft_no : %llu) type : 0x%x, err : %d",
 			   ni->mft_no, ni->type, err);
 		goto out;
 	}
@@ -5131,23 +5253,19 @@ int ntfs_attr_exist(struct ntfs_inode *ni, const __le32 type, __le16 *name,
 int ntfs_attr_remove(struct ntfs_inode *ni, const __le32 type, __le16 *name,
 		u32 name_len)
 {
-	struct super_block *sb;
 	int err;
 	struct inode *attr_vi;
 	struct ntfs_inode *attr_ni;
 
 	ntfs_debug("Entering\n");
 
-	sb = ni->vol->sb;
-	if (!ni) {
-		ntfs_error(sb, "NULL inode pointer\n");
+	if (!ni)
 		return -EINVAL;
-	}
 
 	attr_vi = ntfs_attr_iget(VFS_I(ni), type, name, name_len);
 	if (IS_ERR(attr_vi)) {
 		err = PTR_ERR(attr_vi);
-		ntfs_error(sb, "Failed to open attribute 0x%02x of inode 0x%llx",
+		ntfs_error(ni->vol->sb, "Failed to open attribute 0x%02x of inode 0x%llx",
 				type, (unsigned long long)ni->mft_no);
 		return err;
 	}
@@ -5155,7 +5273,7 @@ int ntfs_attr_remove(struct ntfs_inode *ni, const __le32 type, __le16 *name,
 
 	err = ntfs_attr_rm(attr_ni);
 	if (err)
-		ntfs_error(sb, "Failed to remove attribute 0x%02x of inode 0x%llx",
+		ntfs_error(ni->vol->sb, "Failed to remove attribute 0x%02x of inode 0x%llx",
 				type, (unsigned long long)ni->mft_no);
 	iput(attr_vi);
 	return err;
@@ -5195,6 +5313,13 @@ void *ntfs_attr_readall(struct ntfs_inode *ni, const __le32 type,
 		goto err_exit;
 	}
 	bmp_ni = NTFS_I(bmp_vi);
+
+	if (bmp_ni->data_size > NTFS_ATTR_READALL_MAX_SIZE &&
+		(bmp_ni->type != AT_BITMAP ||
+		bmp_ni->data_size > ((ni->vol->nr_clusters + 7) >> 3))) {
+		ntfs_error(sb, "Invalid attribute data size");
+		goto out;
+	}
 
 	data = kvmalloc(bmp_ni->data_size, GFP_NOFS);
 	if (!data)
