@@ -527,6 +527,51 @@ int ntfs_dio_zero_range(struct inode *inode, loff_t offset, loff_t length)
 				     BLKDEV_ZERO_NOUNMAP);
 }
 
+static int ntfs_zero_locked_folio(struct inode *inode, loff_t start, loff_t end)
+{
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
+	struct folio *folio;
+#else
+	struct page *page;
+#endif
+
+	if (start >= end)
+		return 0;
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
+	folio = filemap_get_folio(inode->i_mapping,
+				  start >> PAGE_SHIFT);
+	if (IS_ERR(folio))
+		return -ENOENT;
+	if (!folio_test_locked(folio)) {
+		folio_put(folio);
+		return -EAGAIN;
+	}
+
+	folio_zero_segment(folio,
+			   offset_in_folio(folio, start),
+			   offset_in_folio(folio, end));
+	folio_mark_dirty(folio);
+	folio_put(folio);
+#else
+	page = find_get_page(inode->i_mapping,
+			     start >> PAGE_SHIFT);
+	if (!page)
+		return -ENOENT;
+	if (!PageLocked(page)) {
+		put_page(page);
+		return -EAGAIN;
+	}
+
+	zero_user_segment(page,
+			  offset_in_page(start),
+			  offset_in_page(end));
+	set_page_dirty(page);
+	put_page(page);
+#endif
+	return 0;
+}
+
 static int ntfs_zero_range(struct inode *inode, loff_t offset, loff_t length)
 {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
@@ -820,8 +865,14 @@ static int ntfs_write_da_iomap_begin_non_resident(struct inode *inode,
 
 	if (ntfs_iomap_flags & NTFS_IOMAP_FLAGS_MKWRITE &&
 	    iomap->offset + iomap->length > ni->initialized_size) {
-		err = ntfs_attr_set_initialized_size(ni, iomap->offset +
-				iomap->length);
+		loff_t z_start = max_t(loff_t, iomap->offset, ni->initialized_size);
+		loff_t z_end = round_up(iomap->offset + iomap->length, PAGE_SIZE);
+
+		err = ntfs_zero_locked_folio(inode, z_start, z_end);
+		if (err)
+			return err;
+
+		err = ntfs_attr_set_initialized_size(ni, z_end);
 	}
 
 	return err;
@@ -884,10 +935,22 @@ static int ntfs_write_iomap_begin_non_resident(struct inode *inode, loff_t offse
 	    offset + length > ni->initialized_size) {
 		int ret;
 
-		ret = ntfs_extend_initialized_size(inode, offset,
+		ret = ntfs_extend_initialized_size(inode,
+						   offset,
 						   offset + length,
 						   ntfs_iomap_flags &
 						   NTFS_IOMAP_FLAGS_DIO);
+		if (ret < 0)
+			return ret;
+	} else if (ntfs_iomap_flags & NTFS_IOMAP_FLAGS_MKWRITE &&
+		   offset > ni->initialized_size) {
+		loff_t z_offset = round_down(offset, PAGE_SIZE);
+		int ret;
+
+		ret = ntfs_extend_initialized_size(inode,
+						   z_offset,
+						   z_offset,
+						   false);
 		if (ret < 0)
 			return ret;
 	}
