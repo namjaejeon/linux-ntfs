@@ -774,12 +774,17 @@ static int ntfs_file_mmap(struct file *file, struct vm_area_struct *vma)
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 0, 0)
-	if (vma_desc_test_flags(desc, VMA_WRITE_BIT)) {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 1, 0)
+	if (vma_desc_test_all(desc, VMA_SHARED_BIT, VMA_MAYWRITE_BIT)) {
 #else
-	if (desc->vm_flags & VM_WRITE) {
+	if (vma_desc_test_flags(desc, VMA_SHARED_BIT) &&
+	    vma_desc_test_flags(desc, VMA_MAYWRITE_BIT)) {
 #endif
 #else
-	if (vma->vm_flags & VM_WRITE) {
+	if ((desc->vm_flags & VM_SHARED) && (desc->vm_flags & VM_MAYWRITE)) {
+#endif
+#else
+	if ((vma->vm_flags & VM_SHARED) && (vma->vm_flags & VM_MAYWRITE)) {
 #endif
 		struct inode *inode = file_inode(file);
 		loff_t from, to;
