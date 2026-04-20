@@ -2868,6 +2868,7 @@ mft_rec_already_initialized:
 			kunmap(page);
 			put_page(page);
 #endif
+			err = -ENOMEM;
 			goto undo_mftbmp_alloc;
 		}
 
