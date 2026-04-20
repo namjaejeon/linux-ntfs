@@ -227,15 +227,10 @@ static int ntfs_readpage(struct file *file, struct page *page)
 	iomap_read_folio(&ntfs_read_iomap_ops, &ctx);
 	return 0;
 #else
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0)
-	iomap_bio_read_folio(folio, &ntfs_read_iomap_ops);
-	return 0;
-#else
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
 	return iomap_read_folio(folio, &ntfs_read_iomap_ops);
 #else
 	return iomap_readpage(page, &ntfs_read_iomap_ops);
-#endif
 #endif
 #endif
 #endif
@@ -472,11 +467,7 @@ static void ntfs_readahead(struct readahead_control *rac)
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 19, 0)
 	iomap_readahead(&ntfs_read_iomap_ops, &ctx);
 #else
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0)
-	iomap_bio_readahead(rac, &ntfs_read_iomap_ops);
-#else
 	iomap_readahead(rac, &ntfs_read_iomap_ops);
-#endif
 #endif
 #endif
 }

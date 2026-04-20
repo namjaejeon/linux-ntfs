@@ -69,6 +69,23 @@ jobs:
         make -j$((`nproc`+1)) KBUILD_MODPOST_WARN=1 KBUILD_MODPOST_NOFINAL=1 fs/ntfs/ntfs.ko
         cd ../linux-ntfs
         rm -rf ../linux-6.12.68/
+    - name: build test with 6.18 kernels
+      run: |
+        wget --no-check-certificate https://mirrors.edge.kernel.org/pub/linux/kernel/v6.x/linux-6.18.22.tar.gz
+        tar xf linux-6.18.22.tar.gz
+        rm linux-6.18.22.tar.gz
+        mkdir linux-6.18.22/fs/ntfs/
+        mv linux-6.18.22 ../
+        cp -ar * ../linux-6.18.22/fs/ntfs/
+        cd ../linux-6.18.22/
+        yes "" | make oldconfig > /dev/null
+        sed -i '/source "fs\/fat\/Kconfig"/a source "fs\/ntfs\/Kconfig"' fs/Kconfig
+        sed -i '/obj-\$(CONFIG_EXFAT_FS).*+= exfat\//i obj-$(CONFIG_NTFS_FS)       += ntfs/' fs/Makefile
+        echo 'CONFIG_NTFS_FS=m' >> .config
+        echo 'CONFIG_GENDWARFKSYMS=n' >> .config
+        make -j$((`nproc`+1)) KBUILD_MODPOST_WARN=1 KBUILD_MODPOST_NOFINAL=1 fs/ntfs/ntfs.ko
+        cd ../linux-ntfs
+        rm -rf ../linux-6.18.22/
     - name: Prerequisite for xfstests testing
       run: |
         sudo apt-get install linux-headers-$(uname -r)
