@@ -462,7 +462,11 @@ static struct ntfs_inode *__ntfs_create(struct user_namespace *mnt_userns, struc
 
 #ifdef CONFIG_NTFS_FS_POSIX_ACL
 	if (!S_ISLNK(mode) && (sb->s_flags & SB_POSIXACL)) {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0)
 		err = ntfs_init_acl(idmap, vi, dir);
+#else
+		err = ntfs_init_acl(mnt_userns, vi, dir);
+#endif
 		if (err)
 			goto err_out;
 	} else
