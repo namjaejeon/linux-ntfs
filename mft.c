@@ -3476,7 +3476,7 @@ unm_done:
 			BUG_ON(!base_tni);
 		}
 		mutex_unlock(&tni->extent_lock);
-		ntfs_debug("Unlocking %s inode 0x%lx.",
+		ntfs_debug("Unlocking %s inode 0x%llx.",
 				tni == base_tni ? "base" : "extent",
 				tni->mft_no);
 		atomic_dec(&tni->count);
