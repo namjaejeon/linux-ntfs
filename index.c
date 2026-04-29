@@ -593,12 +593,9 @@ static int ntfs_ie_lookup(const void *key, const u32 key_len,
 		s64 *vcn, struct index_entry **ie_out)
 {
 	struct index_entry *ie;
-	u8 *index_end;
 	int rc, item = 0;
 
 	ntfs_debug("Entering\n");
-
-	index_end = ntfs_ie_get_end(ih);
 
 	/*
 	 * Loop until we exceed valid memory (corruption case) or until we
@@ -606,11 +603,12 @@ static int ntfs_ie_lookup(const void *key, const u32 key_len,
 	 */
 	for (ie = ntfs_ie_get_first(ih); ; ie = ntfs_ie_get_next(ie)) {
 		/* Bounds checks. */
-		if ((u8 *)ie + sizeof(struct index_entry_header) > index_end ||
-				(u8 *)ie + le16_to_cpu(ie->length) > index_end) {
+		if (ntfs_index_entry_inconsistent(icx, icx->idx_ni->vol, ie,
+						  icx->cr,
+						  icx->idx_ni->mft_no)) {
 			ntfs_error(icx->idx_ni->vol->sb,
-					"Index entry out of bounds in inode %llu.\n",
-					(unsigned long long)icx->idx_ni->mft_no);
+				   "Index entry out of bounds in inode %llu.",
+				   (unsigned long long)icx->idx_ni->mft_no);
 			return -ERANGE;
 		}
 
