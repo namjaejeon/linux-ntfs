@@ -27,6 +27,7 @@
 #include "iomap.h"
 #include "bitmap.h"
 #include "uapi_ntfs.h"
+#include "mft.h"
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 0, 0)
 #include <linux/filelock.h>
@@ -722,7 +723,60 @@ out_lock:
 static vm_fault_t ntfs_filemap_page_mkwrite(struct vm_fault *vmf)
 {
 	struct inode *inode = file_inode(vmf->vma->vm_file);
+	struct ntfs_inode *ni = NTFS_I(inode);
 	vm_fault_t ret;
+	loff_t new_init_size, mmap_init_size;
+
+	if (!inode_trylock(inode))
+		return VM_FAULT_RETRY;
+
+	mmap_init_size = ((loff_t)vmf->pgoff + 1) << PAGE_SHIFT;
+	new_init_size = min(mmap_init_size, i_size_read(inode));
+
+	if (ni->initialized_size < new_init_size) {
+		int err;
+
+		if (ni->zeroed_size < mmap_init_size) {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
+			err = iomap_zero_range(inode, ni->zeroed_size,
+					mmap_init_size - ni->zeroed_size, NULL,
+					&ntfs_seek_iomap_ops,
+					&ntfs_iomap_folio_ops, NULL);
+#else
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 15, 0)
+			err = iomap_zero_range(inode, ni->zeroed_size,
+					mmap_init_size - ni->zeroed_size, NULL,
+					&ntfs_seek_iomap_ops, NULL);
+#else
+			err = iomap_zero_range(inode, ni->zeroed_size,
+					mmap_init_size - ni->zeroed_size, NULL,
+					&ntfs_seek_iomap_ops);
+#endif
+#endif
+
+			if (err < 0) {
+				inode_unlock(inode);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
+				return vmf_fs_error(err);
+#else
+				return block_page_mkwrite_return(err);
+#endif
+			}
+			ni->zeroed_size = mmap_init_size;
+		}
+
+		mutex_lock(&ni->mrec_lock);
+		err = ntfs_attr_set_initialized_size(ni, new_init_size);
+		mutex_unlock(&ni->mrec_lock);
+		if (err) {
+			inode_unlock(inode);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
+			return vmf_fs_error(err);
+#else
+			return block_page_mkwrite_return(err);
+#endif
+		}
+	}
 
 	sb_start_pagefault(inode->i_sb);
 	file_update_time(vmf->vma->vm_file);
@@ -733,6 +787,7 @@ static vm_fault_t ntfs_filemap_page_mkwrite(struct vm_fault *vmf)
 	ret = iomap_page_mkwrite(vmf, &ntfs_page_mkwrite_iomap_ops);
 #endif
 	sb_end_pagefault(inode->i_sb);
+	inode_unlock(inode);
 	return ret;
 }
 
@@ -773,6 +828,7 @@ static int ntfs_file_mmap(struct file *file, struct vm_area_struct *vma)
 	if ((vma->vm_flags & VM_SHARED) && (vma->vm_flags & VM_MAYWRITE)) {
 #endif
 		struct inode *inode = file_inode(file);
+		struct ntfs_inode *ni = NTFS_I(inode);
 		loff_t from, to;
 		int err;
 
@@ -790,6 +846,9 @@ static int ntfs_file_mmap(struct file *file, struct vm_area_struct *vma)
 		to = min_t(loff_t, i_size_read(inode),
 			   from + vma->vm_end - vma->vm_start);
 #endif
+
+		if (!NInoNonResident(ni))
+			ntfs_attr_make_non_resident(ni, ni->data_size);
 
 		if (NTFS_I(inode)->initialized_size < to) {
 			err = ntfs_extend_initialized_size(inode, to, to, false);
