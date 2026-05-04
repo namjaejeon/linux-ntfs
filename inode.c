@@ -417,6 +417,7 @@ int ntfs_drop_big_inode(struct inode *inode)
 				sb_start_intwrite(inode->i_sb);
 				i_size_write(inode, 0);
 				ni->allocated_size = ni->initialized_size = ni->data_size = 0;
+				ni->zeroed_size = 0;
 
 				truncate_inode_pages_final(inode->i_mapping);
 				sb_end_intwrite(inode->i_sb);
@@ -491,7 +492,7 @@ void __ntfs_init_inode(struct super_block *sb, struct ntfs_inode *ni)
 {
 	ntfs_debug("Entering.");
 	rwlock_init(&ni->size_lock);
-	ni->initialized_size = ni->allocated_size = 0;
+	ni->initialized_size = ni->allocated_size = ni->zeroed_size = 0;
 	ni->seq_no = 0;
 	atomic_set(&ni->count, 1);
 	ni->vol = NTFS_SB(sb);
@@ -1057,7 +1058,7 @@ view_index_meta:
 		ni->type = AT_INDEX_ROOT;
 		ni->name = name;
 		ni->name_len = name_len;
-		vi->i_size = ni->initialized_size = ni->data_size =
+		vi->i_size = ni->initialized_size = ni->data_size = ni->zeroed_size =
 			le32_to_cpu(a->data.resident.value_length);
 		ni->allocated_size = (ni->data_size + 7) & ~7;
 		/* We are done with the mft record, so we release it. */
@@ -1081,7 +1082,7 @@ view_index_meta:
 		/* Find first extent of the unnamed data attribute. */
 		err = ntfs_attr_lookup(AT_DATA, NULL, 0, 0, 0, NULL, 0, ctx);
 		if (unlikely(err)) {
-			vi->i_size = ni->initialized_size =
+			vi->i_size = ni->initialized_size = ni->zeroed_size =
 					ni->allocated_size = 0;
 			if (err != -ENOENT) {
 				ntfs_error(vi->i_sb, "Failed to lookup $DATA attribute.");
@@ -1204,10 +1205,12 @@ view_index_meta:
 			}
 			vi->i_size = ni->data_size = le64_to_cpu(a->data.non_resident.data_size);
 			ni->initialized_size = le64_to_cpu(a->data.non_resident.initialized_size);
+			ni->zeroed_size = ni->initialized_size;
 			ni->allocated_size = le64_to_cpu(a->data.non_resident.allocated_size);
 		} else { /* Resident attribute. */
-			vi->i_size = ni->data_size = ni->initialized_size = le32_to_cpu(
-					a->data.resident.value_length);
+			vi->i_size = ni->data_size =
+				le32_to_cpu(a->data.resident.value_length);
+			ni->initialized_size = ni->zeroed_size = ni->data_size;
 			ni->allocated_size = le32_to_cpu(a->length) -
 					le16_to_cpu(
 					a->data.resident.value_offset);
@@ -1412,8 +1415,9 @@ static int ntfs_read_locked_attr_inode(struct inode *base_vi, struct inode *vi)
 				"Found mst protected attribute but the attribute is resident.");
 			goto unm_err_out;
 		}
-		vi->i_size = ni->initialized_size = ni->data_size = le32_to_cpu(
-				a->data.resident.value_length);
+		vi->i_size = ni->data_size =
+			le32_to_cpu(a->data.resident.value_length);
+		ni->initialized_size = ni->zeroed_size = ni->data_size;
 		ni->allocated_size = le32_to_cpu(a->length) -
 				le16_to_cpu(a->data.resident.value_offset);
 		if (vi->i_size > ni->allocated_size) {
@@ -1464,6 +1468,7 @@ static int ntfs_read_locked_attr_inode(struct inode *base_vi, struct inode *vi)
 		}
 		vi->i_size = ni->data_size = le64_to_cpu(a->data.non_resident.data_size);
 		ni->initialized_size = le64_to_cpu(a->data.non_resident.initialized_size);
+		ni->zeroed_size = ni->initialized_size;
 		ni->allocated_size = le64_to_cpu(a->data.non_resident.allocated_size);
 	}
 	vi->i_mapping->a_ops = &ntfs_aops;
@@ -3726,6 +3731,9 @@ static inline int ntfs_enlarge_attribute(struct inode *vi, s64 pos, s64 count,
 		ctx->attr->data.non_resident.initialized_size = cpu_to_le64(pos + count);
 		mark_mft_record_dirty(ctx->ntfs_ino);
 		ni->initialized_size = pos + count;
+
+		if (ni->zeroed_size < ni->initialized_size)
+			ni->zeroed_size = ni->initialized_size;
 		if (i_size_read(vi) < ni->initialized_size)
 			i_size_write(vi, ni->initialized_size);
 	}

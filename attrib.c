@@ -2348,6 +2348,9 @@ int ntfs_attr_set_initialized_size(struct ntfs_inode *ni, loff_t new_size)
 
 	ctx->attr->data.non_resident.initialized_size = cpu_to_le64(new_size);
 	ni->initialized_size = new_size;
+	if (ni->zeroed_size < new_size)
+		ni->zeroed_size = new_size;
+
 	mark_mft_record_dirty(ctx->ntfs_ino);
 out_ctx:
 	ntfs_attr_put_search_ctx(ctx);
@@ -3085,6 +3088,7 @@ static void ntfs_attr_init(struct ntfs_inode *ni, const bool non_resident,
 	ni->allocated_size = allocated_size;
 	ni->data_size = data_size;
 	ni->initialized_size = initialized_size;
+	ni->zeroed_size = initialized_size;
 	if (compressed || sparse) {
 		struct ntfs_volume *vol = ni->vol;
 
@@ -4193,6 +4197,7 @@ static int ntfs_attr_make_resident(struct ntfs_inode *ni, struct ntfs_attr_searc
 	NInoClearEncrypted(ni);
 	ni->flags &= ~FILE_ATTR_ENCRYPTED;
 	ni->initialized_size = ni->data_size;
+	ni->zeroed_size = ni->data_size;
 	ni->allocated_size = ni->itype.compressed.size = (ni->data_size + 7) & ~7;
 	ni->itype.compressed.block_size = 0;
 	ni->itype.compressed.block_size_bits = ni->itype.compressed.block_clusters = 0;
@@ -4335,6 +4340,7 @@ static int ntfs_non_resident_attr_shrink(struct ntfs_inode *ni, const s64 newsiz
 	ctx->attr->data.non_resident.data_size = cpu_to_le64(newsize);
 	if (newsize < ni->initialized_size) {
 		ni->initialized_size = newsize;
+		ni->zeroed_size = newsize;
 		ctx->attr->data.non_resident.initialized_size = cpu_to_le64(newsize);
 	}
 	/* Update data size in the index. */
@@ -4695,6 +4701,8 @@ attr_resize_again:
 		if (!err) {
 			/* Update attribute size everywhere. */
 			attr_ni->data_size = attr_ni->initialized_size = newsize;
+			if (attr_ni->zeroed_size < newsize)
+				attr_ni->zeroed_size = newsize;
 			attr_ni->allocated_size = (newsize + 7) & ~7;
 			if (NInoCompressed(attr_ni) || NInoSparse(attr_ni))
 				attr_ni->itype.compressed.size = attr_ni->allocated_size;
@@ -5475,6 +5483,7 @@ int ntfs_non_resident_attr_collapse_range(struct ntfs_inode *ni, s64 start_vcn, 
 			ni->initialized_size -= ntfs_cluster_to_bytes(vol, len);
 		else
 			ni->initialized_size = ntfs_cluster_to_bytes(vol, start_vcn);
+		ni->zeroed_size = ni->initialized_size;
 	}
 
 	if (ni->allocated_size > 0) {

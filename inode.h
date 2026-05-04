@@ -56,6 +56,7 @@ enum ntfs_inode_mutex_lock_class {
  * @data_size: Copy from the attribute record.
  * @initialized_size: Copy from the attribute record.
  * @allocated_size: Copy from the attribute record.
+ * @zeroed_size: page-aligned size that has been zeroed out for mmap.
  * @i_crtime: File Creation time.
  * @mrec: MFT record
  * @mrec_lock: Lock for serializing access to the mft record belonging to
@@ -113,6 +114,7 @@ struct ntfs_inode {
 	s64 data_size;
 	s64 initialized_size;
 	s64 allocated_size;
+	s64 zeroed_size;
 	struct timespec64 i_crtime;
 	void *mrec;
 	struct mutex mrec_lock;
