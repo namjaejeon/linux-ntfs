@@ -400,13 +400,13 @@ fast_descend_into_child_node:
 			vcn, dir_ni->mft_no);
 		goto unm_err_out;
 	}
-	index_end = (u8 *)&ia->index + le32_to_cpu(ia->index.index_length);
-	if (index_end > (u8 *)ia + dir_ni->itype.index.block_size) {
-		ntfs_error(sb,
-			"Size of index buffer (VCN 0x%llx) of directory inode 0x%llx exceeds maximum size.",
-			vcn, dir_ni->mft_no);
+	err = ntfs_index_header_inconsistent(vol, &ia->index,
+					     dir_ni->itype.index.block_size -
+					     offsetof(struct index_block, index),
+					     dir_ni->mft_no);
+	if (err)
 		goto unm_err_out;
-	}
+	index_end = (u8 *)&ia->index + le32_to_cpu(ia->index.index_length);
 	/* The first index entry. */
 	ie = (struct index_entry *)((u8 *)&ia->index +
 			le32_to_cpu(ia->index.entries_offset));
