@@ -721,6 +721,7 @@ static int ntfs_read_locked_inode(struct inode *vi)
 	unsigned int name_len = 4, flags = 0;
 	int extend_sys = 0;
 	dev_t dev = 0;
+	u32 value_length;
 	bool vol_err = true;
 
 	ntfs_debug("Entering for i_ino 0x%llx.", ni->mft_no);
@@ -943,7 +944,6 @@ skip_attr_list_load:
 	 */
 	if (S_ISDIR(vi->i_mode)) {
 		struct index_root *ir;
-		u8 *ir_end, *index_end;
 
 view_index_meta:
 		/* It is a directory, find index root attribute. */
@@ -991,13 +991,23 @@ view_index_meta:
 			NInoSetSparse(ni);
 			ni->flags |= FILE_ATTR_SPARSE_FILE;
 		}
+
+		value_length = le32_to_cpu(a->data.resident.value_length);
+		if (value_length < offsetof(struct index_root, index)) {
+			ntfs_error(ni->vol->sb,
+				   "$INDEX_ROOT in inode %llu is too small.",
+				   (unsigned long long)ni->mft_no);
+			goto unm_err_out;
+		}
 		ir = (struct index_root *)((u8 *)a +
-				le16_to_cpu(a->data.resident.value_offset));
-		ir_end = (u8 *)ir + le32_to_cpu(a->data.resident.value_length);
-		index_end = (u8 *)&ir->index +
-				le32_to_cpu(ir->index.index_length);
-		if (index_end > ir_end) {
-			ntfs_error(vi->i_sb, "Directory index is corrupt.");
+					   le16_to_cpu(a->data.resident.value_offset));
+		if (ntfs_index_header_inconsistent(ni->vol, &ir->index,
+						   value_length -
+						   offsetof(struct index_root, index),
+						   ni->mft_no)) {
+			ntfs_error(vi->i_sb,
+				   "$INDEX_ROOT in inode 0x%llx is inconsistent.",
+				   ni->mft_no);
 			goto unm_err_out;
 		}
 
