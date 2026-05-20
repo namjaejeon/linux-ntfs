@@ -301,6 +301,10 @@ alloc_new_ea:
 	 * problems with earlier versions.
 	 */
 	p_ea = (struct ea_attr *)ea_buf;
+	if (offsetof(struct ea_attr, ea_name) + name_len + 1 + val_size > new_ea_size) {
+		err = -EINVAL;
+		goto out;
+	}
 	memcpy(p_ea->ea_name, name, name_len);
 	p_ea->ea_name_length = name_len;
 	p_ea->ea_name[name_len] = 0;
