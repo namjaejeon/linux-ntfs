@@ -1970,7 +1970,7 @@ s64 get_nr_free_clusters(struct ntfs_volume *vol)
 	struct page *page;
 #endif
 	pgoff_t index, max_index;
-	struct file_ra_state *ra;
+	struct file_ra_state ra = { 0 };
 
 	ntfs_debug("Entering.");
 	/* Serialize accesses to the cluster bitmap. */
@@ -1978,11 +1978,7 @@ s64 get_nr_free_clusters(struct ntfs_volume *vol)
 	if (NVolFreeClusterKnown(vol))
 		return atomic64_read(&vol->free_clusters);
 
-	ra = kzalloc(sizeof(*ra), GFP_NOFS);
-	if (!ra)
-		return 0;
-
-	file_ra_state_init(ra, mapping);
+	file_ra_state_init(&ra, mapping);
 
 	/*
 	 * Convert the number of bits into bytes rounded up, then convert into
@@ -2002,7 +1998,7 @@ s64 get_nr_free_clusters(struct ntfs_volume *vol)
 		 * if necessary, and increment the use count.
 		 */
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
-		folio = ntfs_get_locked_folio(mapping, index, max_index, ra);
+		folio = ntfs_get_locked_folio(mapping, index, max_index, &ra);
 		/* Ignore pages which errored synchronously. */
 		if (IS_ERR(folio)) {
 			ntfs_debug("Skipping page (index 0x%lx).", index);
@@ -2032,7 +2028,7 @@ s64 get_nr_free_clusters(struct ntfs_volume *vol)
 				unlock_page(page);
 				put_page(page);
 			}
-			page_cache_sync_readahead(mapping, ra, NULL,
+			page_cache_sync_readahead(mapping, &ra, NULL,
 				index, max_index - index);
 			page = read_mapping_page(mapping, index, NULL);
 			if (IS_ERR(page))
@@ -2079,7 +2075,6 @@ s64 get_nr_free_clusters(struct ntfs_volume *vol)
 	else
 		atomic64_set(&vol->free_clusters, nr_free);
 
-	kfree(ra);
 	NVolSetFreeClusterKnown(vol);
 	wake_up_all(&vol->free_waitq);
 	ntfs_debug("Exiting.");
@@ -2138,15 +2133,11 @@ static unsigned long __get_nr_free_mft_records(struct ntfs_volume *vol,
 	struct page *page;
 #endif
 	pgoff_t index;
-	struct file_ra_state *ra;
+	struct file_ra_state ra = { 0 };
 
 	ntfs_debug("Entering.");
 
-	ra = kzalloc(sizeof(*ra), GFP_NOFS);
-	if (!ra)
-		return 0;
-
-	file_ra_state_init(ra, mapping);
+	file_ra_state_init(&ra, mapping);
 
 	/* Use multiples of 4 bytes, thus max_size is PAGE_SIZE / 4. */
 	ntfs_debug("Reading $MFT/$BITMAP, max_index = 0x%lx, max_size = 0x%lx.",
@@ -2159,7 +2150,7 @@ static unsigned long __get_nr_free_mft_records(struct ntfs_volume *vol,
 		 * if necessary, and increment the use count.
 		 */
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
-		folio = ntfs_get_locked_folio(mapping, index, max_index, ra);
+		folio = ntfs_get_locked_folio(mapping, index, max_index, &ra);
 		/* Ignore pages which errored synchronously. */
 		if (IS_ERR(folio)) {
 			ntfs_debug("read_mapping_page() error. Skipping page (index 0x%lx).",
@@ -2188,7 +2179,7 @@ static unsigned long __get_nr_free_mft_records(struct ntfs_volume *vol,
 				unlock_page(page);
 				put_page(page);
 			}
-			page_cache_sync_readahead(mapping, ra, NULL,
+			page_cache_sync_readahead(mapping, &ra, NULL,
 				index, max_index - index);
 			page = read_mapping_page(mapping, index, NULL);
 			if (IS_ERR(page))
@@ -2228,7 +2219,6 @@ static unsigned long __get_nr_free_mft_records(struct ntfs_volume *vol,
 	else
 		atomic64_set(&vol->free_mft_records, nr_free);
 
-	kfree(ra);
 	ntfs_debug("Exiting.");
 	return nr_free;
 }
