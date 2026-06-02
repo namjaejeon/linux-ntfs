@@ -97,33 +97,6 @@ void free_compression_buffers(void)
 }
 
 /*
- * zero_partial_compressed_page - zero out of bounds compressed page region
- * @page: page to zero
- * @initialized_size: initialized size of the attribute
- */
-static void zero_partial_compressed_page(struct page *page,
-		const s64 initialized_size)
-{
-	u8 *kp = page_address(page);
-	unsigned int kp_ofs;
-
-	ntfs_debug("Zeroing page region outside initialized size.");
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 16, 0)
-	if (((s64)page->__folio_index << PAGE_SHIFT) >= initialized_size) {
-		clear_page(kp);
-		return;
-	}
-#else
-	if (((s64)page->index << PAGE_SHIFT) >= initialized_size) {
-		clear_page(kp);
-		return;
-	}
-#endif
-	kp_ofs = initialized_size & ~PAGE_MASK;
-	memset(kp + kp_ofs, 0, PAGE_SIZE - kp_ofs);
-}
-
-/*
  * handle_bounds_compressed_page - test for&handle out of bounds compressed page
  * @page: page to check and handle
  * @i_size: file size
@@ -132,15 +105,25 @@ static void zero_partial_compressed_page(struct page *page,
 static inline void handle_bounds_compressed_page(struct page *page,
 		const loff_t i_size, const s64 initialized_size)
 {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 16, 0)
-	if ((page->__folio_index >= (initialized_size >> PAGE_SHIFT)) &&
-			(initialized_size < i_size))
-		zero_partial_compressed_page(page, initialized_size);
+	const struct folio *folio = page_folio(page);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 13, 0)
+	pgoff_t page_index = page_pgoff(folio, page);
 #else
-	if ((page->index >= (initialized_size >> PAGE_SHIFT)) &&
-			(initialized_size < i_size))
-		zero_partial_compressed_page(page, initialized_size);
+	pgoff_t page_index = folio->index + folio_page_idx(folio, page);
 #endif
+	size_t offset;
+
+	if ((page_index < (initialized_size >> PAGE_SHIFT)) ||
+			(initialized_size >= i_size))
+		return;
+
+	ntfs_debug("Zeroing page region outside initialized size.");
+	if (((loff_t)page_index << PAGE_SHIFT) >= initialized_size)
+		offset = 0;
+	else
+		offset = initialized_size & ~PAGE_MASK;
+
+	zero_user_segment(page, offset, PAGE_SIZE);
 }
 
 /*
@@ -244,7 +227,6 @@ return_error:
 				 */
 				handle_bounds_compressed_page(dp, i_size,
 						initialized_size);
-				flush_dcache_page(dp);
 				kunmap_local(page_address(dp));
 				SetPageUptodate(dp);
 				unlock_page(dp);
@@ -798,7 +780,6 @@ lock_retry_remap:
 				 */
 				handle_bounds_compressed_page(page, i_size,
 						initialized_size);
-				flush_dcache_page(page);
 				kunmap_local(page_address(page));
 				SetPageUptodate(page);
 				unlock_page(page);
