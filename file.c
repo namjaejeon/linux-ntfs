@@ -27,6 +27,8 @@
 #include "iomap.h"
 #include "bitmap.h"
 #include "uapi_ntfs.h"
+#include "volume.h"
+
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 0, 0)
 #include <linux/filelock.h>
 #endif
@@ -843,12 +845,13 @@ static const char *ntfs_get_link(struct dentry *dentry, struct inode *inode,
 	if (ni->reparse_tag == IO_REPARSE_TAG_MOUNT_POINT ||
 	    (ni->reparse_tag == IO_REPARSE_TAG_SYMLINK &&
 	     !(ni->reparse_flags & cpu_to_le32(SYMLINK_FLAG_RELATIVE)))) {
-		err = ntfs_translate_symlink_path(dentry, ni->target, &target);
-		if (err < 0)
-			return ERR_PTR(err);
-
-		set_delayed_call(done, kfree_link, target);
-		return target;
+		if (NVolNativeSymlinkRel(ni->vol)) {
+			err = ntfs_translate_symlink_path(dentry, ni->target, &target);
+			if (err < 0)
+				return ERR_PTR(err);
+			set_delayed_call(done, kfree_link, target);
+			return target;
+		}
 	}
 
 	return ni->target;
