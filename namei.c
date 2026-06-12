@@ -646,7 +646,10 @@ static struct ntfs_inode *__ntfs_create(struct user_namespace *mnt_userns, struc
 			goto err_out;
 
 		if (S_ISLNK(mode)) {
-			err = ntfs_reparse_set_wsl_symlink(ni, target, target_len);
+			if (NVolSymlinkNative(vol))
+				err = ntfs_reparse_set_native_symlink(ni, target, target_len);
+			else
+				err = ntfs_reparse_set_wsl_symlink(ni, target, target_len);
 			if (!err)
 				rollback_reparse = true;
 		} else if (S_ISBLK(mode) || S_ISCHR(mode) || S_ISSOCK(mode) ||

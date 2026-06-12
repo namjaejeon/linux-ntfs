@@ -786,6 +786,130 @@ int ntfs_reparse_set_wsl_symlink(struct ntfs_inode *ni,
 	return err;
 }
 
+int ntfs_reparse_set_native_symlink(struct ntfs_inode *ni,
+				    const char *target, int target_len)
+{
+	int err = 0;
+	bool is_absolute;
+	char *norm_name = NULL;
+	char *sub_name = NULL;
+	char *prt_name = NULL;
+	__le16 *sub_name_utf16 = NULL;
+	__le16 *prt_name_utf16 = NULL;
+	int sub_len, prt_len;
+	int total_data_len, total_reparse_len;
+	struct reparse_point *reparse = NULL;
+	struct symlink_reparse_data *data;
+	int i;
+
+	/* Determine if target is absolute (starts with drive letter like C:) */
+	is_absolute = (target_len > 1 && target[1] == ':');
+
+	/* Normalize and prepare NLS paths */
+	norm_name = kstrdup(target, GFP_NOFS);
+	if (!norm_name)
+		return -ENOMEM;
+
+	/* Replace '/' with '\' */
+	for (i = 0; i < target_len; i++) {
+		if (norm_name[i] == '/')
+			norm_name[i] = '\\';
+	}
+
+	if (is_absolute) {
+		prt_name = kstrdup(norm_name, GFP_NOFS);
+		if (!prt_name) {
+			err = -ENOMEM;
+			goto out;
+		}
+		/* Prepend '\??\' to Substitutename */
+		sub_name = kmalloc(target_len + 5, GFP_NOFS);
+		if (!sub_name) {
+			err = -ENOMEM;
+			goto out;
+		}
+		strscpy(sub_name, "\\??\\", target_len + 5);
+		strcat(sub_name, norm_name);
+	} else {
+		/* For relative symlinks (including absolute paths without drive letters),
+		 * SubstituteName and PrintName are identical.
+		 */
+		prt_name = kstrdup(norm_name, GFP_NOFS);
+		sub_name = kstrdup(norm_name, GFP_NOFS);
+		if (!prt_name || !sub_name) {
+			err = -ENOMEM;
+			goto out;
+		}
+	}
+
+	/* Convert NLS paths to UTF-16 */
+	sub_len = ntfs_nlstoucs(ni->vol, sub_name, strlen(sub_name),
+				&sub_name_utf16, PATH_MAX);
+	if (sub_len < 0) {
+		err = sub_len;
+		goto out;
+	}
+
+	prt_len = ntfs_nlstoucs(ni->vol, prt_name, strlen(prt_name),
+				&prt_name_utf16, PATH_MAX);
+	if (prt_len < 0) {
+		err = prt_len;
+		goto out;
+	}
+
+	/* Check for buffer size limits */
+	total_data_len = sizeof(struct symlink_reparse_data) +
+		(sub_len + prt_len) * sizeof(__le16);
+	if (total_data_len > 16384) { /* 16KB max reparse tag size */
+		err = -EFBIG;
+		goto out;
+	}
+
+	total_reparse_len = sizeof(struct reparse_point) + total_data_len;
+	reparse = kvzalloc(total_reparse_len, GFP_NOFS);
+	if (!reparse) {
+		err = -ENOMEM;
+		goto out;
+	}
+
+	/* Pack fields in reparse buffer */
+	reparse->reparse_tag = IO_REPARSE_TAG_SYMLINK;
+	reparse->reparse_data_length = cpu_to_le16(total_data_len);
+	reparse->reserved = 0;
+
+	data = (struct symlink_reparse_data *)reparse->reparse_data;
+	data->substitute_name_offset = 0;
+	data->substitute_name_length = cpu_to_le16(sub_len * sizeof(__le16));
+	data->print_name_offset = data->substitute_name_length;
+	data->print_name_length = cpu_to_le16(prt_len * sizeof(__le16));
+	data->flags = cpu_to_le32(is_absolute ? 0 : SYMLINK_FLAG_RELATIVE);
+
+	/* Copy names to path_buffer */
+	memcpy(data->path_buffer, sub_name_utf16, sub_len * sizeof(__le16));
+	memcpy(data->path_buffer + sub_len, prt_name_utf16, prt_len * sizeof(__le16));
+
+	err = ntfs_set_ntfs_reparse_data(ni, (char *)reparse, total_reparse_len);
+	if (!err) {
+		for (i = 0; i < target_len; i++) {
+			if (norm_name[i] == '\\')
+				norm_name[i] = '/';
+		}
+		ni->target = norm_name;
+		norm_name = NULL;
+	}
+
+out:
+	kfree(norm_name);
+	kfree(sub_name);
+	kfree(prt_name);
+	if (sub_name_utf16)
+		kvfree(sub_name_utf16);
+	if (prt_name_utf16)
+		kvfree(prt_name_utf16);
+	kvfree(reparse);
+	return err;
+}
+
 /*
  * Set reparse data for a WSL special file other than a symlink
  * (socket, fifo, character or block device)
