@@ -1355,12 +1355,7 @@ static int ntfs_ioctl_list_streams(struct file *filp, unsigned long arg)
 			goto out;
 		}
 
-		entry = kzalloc(entry_size, GFP_NOFS);
-		if (!entry) {
-			ret = -ENOMEM;
-			ntfs_attr_name_free(&sn);
-			goto out;
-		}
+		entry = (struct ntfs_stream_entry *)(kbuf + offset);
 
 		if (a->non_resident) {
 			entry->size = le64_to_cpu(a->data.non_resident.data_size);
@@ -1377,9 +1372,7 @@ static int ntfs_ioctl_list_streams(struct file *filp, unsigned long arg)
 		memcpy(entry->name, sn, name_len);
 		ntfs_attr_name_free(&sn);
 
-		memcpy((u8 *)kbuf + offset, entry, entry_size);
 		offset += entry_size;
-		kfree(entry);
 	}
 	if (err != -ENOENT)
 		ret = err;
