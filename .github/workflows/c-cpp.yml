@@ -149,6 +149,8 @@ jobs:
         rm xfstests-exfat.tgz
         cd xfstests-exfat
         cp local.config.ntfs local.config
+        echo "" >> local.config
+        echo 'MOUNT_OPTIONS="-osymlink=native,native_symlink=rel"' >> local.config
         make -j$((`nproc`+1)) > /dev/null
         echo 'FSTYP=ntfs' >> local.config
         sudo ./check generic/001
