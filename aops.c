@@ -172,6 +172,8 @@ static int ntfs_readpage(struct file *file, struct page *page)
 		/* Compressed data streams are handled in compress.c. */
 		if (NInoNonResident(ni) && NInoCompressed(ni))
 			return ntfs_read_compressed_block(folio);
+		else if (NInoWofCompressed(ni))
+			return ntfs_read_wof_compressed_block(folio);
 	}
 #else
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 19, 0)
@@ -223,6 +225,10 @@ static int ntfs_readpage(struct file *file, struct page *page)
 			BUG_ON(ni->type != AT_DATA);
 			BUG_ON(ni->name_len);
 			return ntfs_read_compressed_block(page);
+		} else if (NInoWofCompressed(ni)) {
+			BUG_ON(ni->type != AT_DATA);
+			BUG_ON(ni->name_len);
+			return ntfs_read_wof_compressed_block(page);
 		}
 	}
 #endif
@@ -466,7 +472,8 @@ static void ntfs_readahead(struct readahead_control *rac)
 	 * Resident files are not cached in the page cache,
 	 * and readahead is not implemented for compressed files.
 	 */
-	if (!NInoNonResident(ni) || NInoCompressed(ni))
+	if (!NInoNonResident(ni) || NInoCompressed(ni) ||
+	    NInoWofCompressed(ni))
 		return;
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 0, 0)
