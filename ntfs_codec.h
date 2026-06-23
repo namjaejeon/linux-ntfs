@@ -42,5 +42,9 @@ struct ntfs_codec_ops {
 };
 
 extern const struct ntfs_codec_ops ntfs_lznt1_codec_ops;
+extern const struct ntfs_codec_ops ntfs_xpress4k_codec_ops;
+extern const struct ntfs_codec_ops ntfs_xpress8k_codec_ops;
+extern const struct ntfs_codec_ops ntfs_xpress16k_codec_ops;
+extern const struct ntfs_codec_ops ntfs_lzx32k_codec_ops;
 
 #endif /* _NTFS_CODEC_H */
