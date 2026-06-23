@@ -104,7 +104,8 @@ static int parse_wof_chunk_table(struct ntfs_inode *ni, u64 chunk_idx, u64 chunk
 {
 	u8 bytes_per_off;
 	u8 *buf_aligned = NULL, *buf = NULL;
-	u64 off[2];
+	u64 addr[2] = {0, }, off[2];
+	u64 byte_off;
 	u64 chunk_data_size;
 	int ret = 0;
 
@@ -119,15 +120,14 @@ static int parse_wof_chunk_table(struct ntfs_inode *ni, u64 chunk_idx, u64 chunk
 		return -EINVAL;
 	chunk_data_size = ni->data_size - (chunk_count - 1) * bytes_per_off;
 
+	if (chunk_idx > 0)
+		byte_off = (chunk_idx - 1) * bytes_per_off;
+	else
+		byte_off = 0;
+
 	if (NInoNonResident(ni)) {
-		u64 byte_off;
 		sector_t start_sector;
 		u32 sector_off, sectors;
-
-		if (chunk_idx > 0)
-			byte_off = (chunk_idx - 1) * bytes_per_off;
-		else
-			byte_off = 0;
 
 		start_sector = byte_off >> 9;
 		sector_off = byte_off & ((1 << 9) - 1);
@@ -144,21 +144,61 @@ static int parse_wof_chunk_table(struct ntfs_inode *ni, u64 chunk_idx, u64 chunk
 			goto out;
 		}
 		buf = buf_aligned + sector_off;
-
-		if (chunk_idx + 1 == chunk_count) {
-			if (bytes_per_off == sizeof(__le32))
-				((__le32 *)buf)[1] =
-					cpu_to_le32(ni->data_size -
-						    (chunk_count - 1) * bytes_per_off);
-			else
-				((__le64 *)buf)[1] =
-					cpu_to_le64(ni->data_size -
-						    (chunk_count - 1) * bytes_per_off);
-		}
 	} else {
-		/* Resident WOF chunk table logic will be added in Commit 8 */
-		ret = -EOPNOTSUPP;
-		goto out;
+		struct ntfs_attr_search_ctx *ctx = NULL;
+		u32 value_length;
+		u16 value_offset;
+		u8 *attr;
+
+		ctx = ntfs_attr_get_search_ctx(ni, NULL);
+		if (!ctx) {
+			ret = -ENOMEM;
+			goto out;
+		}
+
+		ret = ntfs_attr_lookup(AT_DATA, (__le16 *)WOF_NAME,
+				       WOF_NAME_LEN, CASE_SENSITIVE, 0, NULL, 0,
+				       ctx);
+		if (ret) {
+			ntfs_attr_put_search_ctx(ctx);
+			goto out;
+		}
+
+		value_length =
+			le32_to_cpu(ctx->attr->data.resident.value_length);
+		value_offset =
+			le16_to_cpu(ctx->attr->data.resident.value_offset);
+
+		if (byte_off + bytes_per_off > value_length ||
+		    (chunk_idx + 1 != chunk_count &&
+		     byte_off + 2 * bytes_per_off > value_length)) {
+			ntfs_attr_put_search_ctx(ctx);
+			ret = -EINVAL;
+			goto out;
+		}
+
+		attr = (u8 *)ctx->attr + value_offset;
+
+		if (chunk_idx + 1 == chunk_count)
+			memcpy((u8 *)addr, attr + byte_off, bytes_per_off);
+		else
+			memcpy((u8 *)addr, attr + byte_off, 2 * bytes_per_off);
+
+		buf = (u8 *)addr;
+
+		ntfs_attr_put_search_ctx(ctx);
+	}
+
+	/* Last chunk has an implicit end offset derived from data_size. */
+	if (chunk_idx + 1 == chunk_count) {
+		if (bytes_per_off == sizeof(__le32))
+			((__le32 *)buf)[1] =
+				cpu_to_le32(ni->data_size -
+					    (chunk_count - 1) * bytes_per_off);
+		else
+			((__le64 *)buf)[1] =
+				cpu_to_le64(ni->data_size -
+					    (chunk_count - 1) * bytes_per_off);
 	}
 
 	if (bytes_per_off == sizeof(__le32)) {
@@ -265,7 +305,7 @@ int ntfs_read_wof_compressed_block(struct page *page)
 	}
 
 	wof_ni = NTFS_I(wof_inode);
-	if (!wof_ni->runlist.rl) {
+	if (NInoNonResident(wof_ni) && !NInoFullyMapped(wof_ni)) {
 		err = ntfs_attr_map_whole_runlist(wof_ni);
 		if (err)
 			goto out_iput;
@@ -330,9 +370,35 @@ int ntfs_read_wof_compressed_block(struct page *page)
 
 	/* Read compressed data from disk */
 	if (!NInoNonResident(wof_ni)) {
-		/* Resident WOF data read logic will be added in Commit 8 */
-		err = -EOPNOTSUPP;
-		goto out_free;
+		struct ntfs_attr_search_ctx *ctx = NULL;
+
+		ctx = ntfs_attr_get_search_ctx(wof_ni, NULL);
+		if (!ctx) {
+			err = -ENOMEM;
+			goto out_free;
+		}
+
+		err = ntfs_attr_lookup(AT_DATA, (__le16 *)WOF_NAME,
+				       WOF_NAME_LEN, CASE_SENSITIVE,
+				       0, NULL, 0, ctx);
+		if (err) {
+			ntfs_attr_put_search_ctx(ctx);
+			goto out_free;
+		}
+
+		if (chunk_offset + chunk_size >
+		    le32_to_cpu(ctx->attr->data.resident.value_length)) {
+			ntfs_attr_put_search_ctx(ctx);
+			err = -EINVAL;
+			goto out_free;
+		}
+
+		memcpy(chunk_mem_aligned,
+		       (u8 *)ctx->attr +
+		       le16_to_cpu(ctx->attr->data.resident.value_offset) +
+		       chunk_offset, chunk_size);
+		ntfs_attr_put_search_ctx(ctx);
+		chunk_mem = chunk_mem_aligned;
 	} else {
 		err = ntfs_bdev_read_from_rl(vol, &wof_ni->runlist,
 					     chunk_offset >> 9,
