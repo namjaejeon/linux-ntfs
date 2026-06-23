@@ -11,6 +11,7 @@ ntfs-y := aops.o attrib.o collate.o dir.o file.o index.o inode.o \
 
 ccflags-$(CONFIG_NTFS_DEBUG) += -DDEBUG
 ccflags-y += -DCONFIG_NTFS_FS_POSIX_ACL
+ccflags-y += -DCONFIG_NTFS_FS_WOF_COMPRESSION
 else
 # Called from external kernel module build
 
