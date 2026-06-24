@@ -1260,7 +1260,7 @@ static int ntfs_ioctl_list_streams(struct file *filp, unsigned long arg)
 	struct inode *inode = file_inode(filp);
 	struct ntfs_inode *ni = NTFS_I(inode);
 	struct ntfs_list_streams hdr;
-	struct ntfs_stream_entry *entry;
+	struct ntfs_stream_entry *entry, *last_entry = NULL;
 	size_t required = 0;
 	void *kbuf = NULL;
 	void __user *ubuf;
@@ -1372,12 +1372,18 @@ static int ntfs_ioctl_list_streams(struct file *filp, unsigned long arg)
 		memcpy(entry->name, sn, name_len);
 		ntfs_attr_name_free(&sn);
 
+		entry->next_entry_off = entry_size;
+		last_entry = entry;
 		offset += entry_size;
 	}
-	if (err != -ENOENT)
+	if (err != -ENOENT) {
 		ret = err;
-	else
+	} else {
+		/* The chain terminates at the last entry. */
+		if (last_entry)
+			last_entry->next_entry_off = 0;
 		hdr.bytes_returned = offset;
+	}
 
 out:
 	mutex_unlock(&ni->mrec_lock);

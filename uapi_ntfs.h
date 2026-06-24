@@ -27,21 +27,26 @@
  *
  * @stream_offset:	Offset within the named stream.
  * @io_len:		Number of bytes to read/write.
- * @result_size:	Actual bytes transferred.
+ * @result_size:	Actual bytes transferred (out).
  * @flags:		Must be zero.
  * @reserved:		Must be zero.
- * @name_len:		Stream name length.
+ * @name_len:		Stream name length in bytes, not including any
+ *			terminating NUL (which must not be present).
  * @reserved2:		Must be zero.
  * @buffer:		Stream name followed by stream data.
  *
- * The stream name is encoded with the mounted filesystem NLS.  For read and
- * write, @io_len bytes of data follow the name.  For remove, only the name
- * is required and @io_len must be zero.
+ * The stream name is the bare stream name, without the leading ':' or the
+ * trailing ":$DATA" decoration used by Windows, and is encoded with the
+ * mounted filesystem NLS.  For read and write, @io_len bytes of data follow
+ * the name.  For remove, only the name is required and @io_len must be zero.
+ *
+ * All 64-bit fields use __aligned_u64 so the layout is identical for 32-bit
+ * and 64-bit userspace and no compat translation is required.
  */
 struct ntfs_stream {
-	__u64 stream_offset;
-	__u64 io_len;
-	__u64 result_size;
+	__aligned_u64 stream_offset;
+	__aligned_u64 io_len;
+	__aligned_u64 result_size;
 	__u32 flags;
 	__u32 reserved;
 	__u32 name_len;
@@ -49,9 +54,26 @@ struct ntfs_stream {
 	__u8 buffer[]; /* name + data */
 };
 
+/*
+ * Single stream entry returned by NTFS_IOC_LIST_STREAMS.
+ *
+ * @next_entry_off:	Byte offset from the start of this entry to the next
+ *			entry, or zero for the last entry.  Always a multiple
+ *			of 8.  Consumers must use this to advance instead of
+ *			computing the stride themselves, so the entry can grow
+ *			new fields without breaking the ABI.
+ * @size:		Stream data size in bytes.
+ * @alloc_size:		Bytes allocated for the stream (cluster aligned for
+ *			non-resident streams).
+ * @name_len:		Stream name length in bytes, not including a NUL
+ *			terminator (none is stored).
+ * @reserved:		Must be zero.
+ * @name:		Bare stream name, NLS encoded (see struct ntfs_stream).
+ */
 struct ntfs_stream_entry {
-	__u64 size;
-	__u64 alloc_size;
+	__aligned_u64 next_entry_off;
+	__aligned_u64 size;
+	__aligned_u64 alloc_size;
 	__u32 name_len;
 	__u32 reserved;
 	__u8 name[];
@@ -66,11 +88,17 @@ struct ntfs_stream_entry {
  * @flags:		Must be zero.
  * @reserved:		Must be zero.
  * @buffer:		ntfs_stream_entry array.
+ *
+ * The variable-length entries follow the header in @buffer, each aligned on
+ * an 8-byte boundary and chained via ntfs_stream_entry.next_entry_off.  If
+ * @buffer_size is too small, no data is copied, @stream_count and
+ * @bytes_returned report the required values and the ioctl fails with
+ * -ENOSPC.
  */
 struct ntfs_list_streams {
-	__u64 buffer_size;
-	__u64 bytes_returned;
-	__u64 stream_count;
+	__aligned_u64 buffer_size;
+	__aligned_u64 bytes_returned;
+	__aligned_u64 stream_count;
 	__u32 flags;
 	__u32 reserved;
 	__u8 buffer[];
