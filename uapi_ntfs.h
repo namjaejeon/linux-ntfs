@@ -23,22 +23,38 @@
 #define NTFS_IOC_MAGIC	'N'
 
 /*
+ * Flags for ntfs_stream.flags and ntfs_list_streams.flags.
+ *
+ * NTFS_STREAM_FL_UTF16: the stream name is raw UTF-16LE, exactly as stored on
+ * disk, instead of being encoded with the mounted filesystem NLS.  This allows
+ * lossless round-tripping of stream names whose characters are not
+ * representable in the mount NLS (e.g. for Wine, which works in UTF-16
+ * natively).  When set, the name length fields count bytes of UTF-16LE and
+ * must therefore be even.
+ */
+#define NTFS_STREAM_FL_UTF16	0x1
+
+/*
  * ntfs named stream ioctl structure.
  *
  * @stream_offset:	Offset within the named stream.
  * @io_len:		Number of bytes to read/write.
  * @result_size:	Actual bytes transferred (out).
- * @flags:		Must be zero.
+ * @flags:		Bit mask of NTFS_STREAM_FL_* flags; other bits must be
+ *			zero.
  * @reserved:		Must be zero.
  * @name_len:		Stream name length in bytes, not including any
- *			terminating NUL (which must not be present).
+ *			terminating NUL (which must not be present).  When
+ *			NTFS_STREAM_FL_UTF16 is set this is a UTF-16LE byte
+ *			count and must be even.
  * @reserved2:		Must be zero.
  * @buffer:		Stream name followed by stream data.
  *
  * The stream name is the bare stream name, without the leading ':' or the
- * trailing ":$DATA" decoration used by Windows, and is encoded with the
- * mounted filesystem NLS.  For read and write, @io_len bytes of data follow
- * the name.  For remove, only the name is required and @io_len must be zero.
+ * trailing ":$DATA" decoration used by Windows.  By default it is encoded with
+ * the mounted filesystem NLS; if NTFS_STREAM_FL_UTF16 is set in @flags it is
+ * raw UTF-16LE instead.  For read and write, @io_len bytes of data follow the
+ * name.  For remove, only the name is required and @io_len must be zero.
  *
  * All 64-bit fields use __aligned_u64 so the layout is identical for 32-bit
  * and 64-bit userspace and no compat translation is required.
@@ -66,9 +82,12 @@ struct ntfs_stream {
  * @alloc_size:		Bytes allocated for the stream (cluster aligned for
  *			non-resident streams).
  * @name_len:		Stream name length in bytes, not including a NUL
- *			terminator (none is stored).
+ *			terminator (none is stored).  Counts UTF-16LE bytes
+ *			when NTFS_STREAM_FL_UTF16 was requested.
  * @reserved:		Must be zero.
- * @name:		Bare stream name, NLS encoded (see struct ntfs_stream).
+ * @name:		Bare stream name; NLS encoded, or raw UTF-16LE when
+ *			NTFS_STREAM_FL_UTF16 was requested (see struct
+ *			ntfs_stream).
  */
 struct ntfs_stream_entry {
 	__aligned_u64 next_entry_off;
@@ -85,7 +104,8 @@ struct ntfs_stream_entry {
  * @buffer_size:	user buffer size(in).
  * @bytes_returned:	actual bytes written or required(out).
  * @stream_count:	number of streams(out).
- * @flags:		Must be zero.
+ * @flags:		Bit mask of NTFS_STREAM_FL_* flags controlling the
+ *			encoding of the returned names; other bits must be zero.
  * @reserved:		Must be zero.
  * @buffer:		ntfs_stream_entry array.
  *

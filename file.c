@@ -1149,20 +1149,32 @@ static long ntfs_ioctl_stream(struct file *filp, unsigned long arg,
 	size_t header_size = sizeof(struct ntfs_stream);
 	size_t data_size, total_size;
 	char *kname, *kdata;
-	__le16 *uname = NULL;
-	int err = 0, uname_len;
+	__le16 *uname = NULL, *sname;
+	int err = 0, sname_len;
+	bool utf16;
 	struct ntfs_stream hdr;
 
 	/* First copy fixed header */
 	if (copy_from_user(&hdr, ureq, header_size))
 		return -EFAULT;
 
-	if (hdr.name_len == 0 || hdr.name_len > NTFS_MAX_NAME_LEN)
-		return -EINVAL;
-
-	if (hdr.io_len > NTFS_STREAM_MAX_IO || hdr.flags ||
+	if (hdr.io_len > NTFS_STREAM_MAX_IO ||
+	    (hdr.flags & ~NTFS_STREAM_FL_UTF16) ||
 	    hdr.reserved || hdr.reserved2)
 		return -EINVAL;
+
+	utf16 = hdr.flags & NTFS_STREAM_FL_UTF16;
+
+	if (hdr.name_len == 0)
+		return -EINVAL;
+	if (utf16) {
+		/* UTF-16LE byte count: must be even and within the limit. */
+		if ((hdr.name_len & 1) ||
+		    hdr.name_len > NTFS_MAX_NAME_LEN * sizeof(__le16))
+			return -EINVAL;
+	} else if (hdr.name_len > NTFS_MAX_NAME_LEN) {
+		return -EINVAL;
+	}
 
 	switch (op) {
 	case NTFS_STREAM_OP_READ:
@@ -1198,22 +1210,32 @@ static long ntfs_ioctl_stream(struct file *filp, unsigned long arg,
 	kdata = (char *)req->buffer + req->name_len;
 
 	if (req->name_len != hdr.name_len || req->io_len != hdr.io_len ||
-	    req->flags || req->reserved || req->reserved2 ||
-	    memchr(kname, '\0', req->name_len)) {
+	    req->flags != hdr.flags || req->reserved || req->reserved2) {
 		err = -EINVAL;
 		goto out_free;
 	}
 
-	uname_len = ntfs_nlstoucs(ni->vol, kname, req->name_len,
-			&uname, NTFS_MAX_NAME_LEN);
-	if (uname_len < 0) {
-		err = uname_len;
-		goto out_free;
+	if (utf16) {
+		/* Name is already on-disk UTF-16LE; use it in place. */
+		sname = (__le16 *)kname;
+		sname_len = req->name_len / sizeof(__le16);
+	} else {
+		if (memchr(kname, '\0', req->name_len)) {
+			err = -EINVAL;
+			goto out_free;
+		}
+		sname_len = ntfs_nlstoucs(ni->vol, kname, req->name_len,
+				&uname, NTFS_MAX_NAME_LEN);
+		if (sname_len < 0) {
+			err = sname_len;
+			goto out_free;
+		}
+		sname = uname;
 	}
 
 	switch (op) {
 	case NTFS_STREAM_OP_READ:
-		err = ntfs_read_named_stream(ni, uname, uname_len,
+		err = ntfs_read_named_stream(ni, sname, sname_len,
 					     req->stream_offset, req->io_len,
 					     kdata,
 					     &req->result_size);
@@ -1227,7 +1249,7 @@ static long ntfs_ioctl_stream(struct file *filp, unsigned long arg,
 		err = mnt_want_write_file(filp);
 		if (err)
 			break;
-		err = ntfs_write_named_stream(ni, uname, uname_len,
+		err = ntfs_write_named_stream(ni, sname, sname_len,
 					      req->stream_offset, req->io_len,
 					      kdata,
 					      &req->result_size);
@@ -1241,7 +1263,7 @@ static long ntfs_ioctl_stream(struct file *filp, unsigned long arg,
 		err = mnt_want_write_file(filp);
 		if (err)
 			break;
-		err = ntfs_remove_named_stream(ni, uname, uname_len);
+		err = ntfs_remove_named_stream(ni, sname, sname_len);
 		mnt_drop_write_file(filp);
 		break;
 	default:
@@ -1270,12 +1292,15 @@ static int ntfs_ioctl_list_streams(struct file *filp, unsigned long arg)
 	size_t entry_size, offset = 0;
 	unsigned int name_len;
 	unsigned char *sn;
+	bool utf16;
 
 	if (copy_from_user(&hdr, (void __user *)arg, sizeof(hdr)))
 		return -EFAULT;
 
-	if (hdr.flags || hdr.reserved)
+	if ((hdr.flags & ~NTFS_STREAM_FL_UTF16) || hdr.reserved)
 		return -EINVAL;
+
+	utf16 = hdr.flags & NTFS_STREAM_FL_UTF16;
 
 	ubuf = (void __user *)arg + sizeof(hdr);
 
@@ -1291,15 +1316,19 @@ static int ntfs_ioctl_list_streams(struct file *filp, unsigned long arg)
 		if (a->type != AT_DATA || !a->name_length)
 			continue;
 
-		sn = ntfs_attr_name_get(ni->vol,
-				(__le16 *)((u8 *)a + le16_to_cpu(a->name_offset)),
-				a->name_length);
-		if (!sn) {
-			ret = -EIO;
-			goto out;
+		if (utf16) {
+			name_len = a->name_length * sizeof(__le16);
+		} else {
+			sn = ntfs_attr_name_get(ni->vol,
+					(__le16 *)((u8 *)a + le16_to_cpu(a->name_offset)),
+					a->name_length);
+			if (!sn) {
+				ret = -EIO;
+				goto out;
+			}
+			name_len = strlen(sn);
+			ntfs_attr_name_free(&sn);
 		}
-		name_len = strlen(sn);
-		ntfs_attr_name_free(&sn);
 
 		entry_size = sizeof(*entry) + name_len;
 		entry_size = ALIGN(entry_size, 8);
@@ -1338,14 +1367,19 @@ static int ntfs_ioctl_list_streams(struct file *filp, unsigned long arg)
 		a = actx->attr;
 		if (a->type != AT_DATA || !a->name_length)
 			continue;
-		sn = ntfs_attr_name_get(ni->vol,
-				(__le16 *)((u8 *)a + le16_to_cpu(a->name_offset)),
-				a->name_length);
-		if (!sn) {
-			ret = -EIO;
-			goto out;
+		if (utf16) {
+			sn = NULL;
+			name_len = a->name_length * sizeof(__le16);
+		} else {
+			sn = ntfs_attr_name_get(ni->vol,
+					(__le16 *)((u8 *)a + le16_to_cpu(a->name_offset)),
+					a->name_length);
+			if (!sn) {
+				ret = -EIO;
+				goto out;
+			}
+			name_len = strlen(sn);
 		}
-		name_len = strlen(sn);
 
 		entry_size = sizeof(*entry) + name_len;
 		entry_size = ALIGN(entry_size, 8);
@@ -1369,7 +1403,11 @@ static int ntfs_ioctl_list_streams(struct file *filp, unsigned long arg)
 		}
 
 		entry->name_len = name_len;
-		memcpy(entry->name, sn, name_len);
+		if (utf16)
+			memcpy(entry->name,
+			       (u8 *)a + le16_to_cpu(a->name_offset), name_len);
+		else
+			memcpy(entry->name, sn, name_len);
 		ntfs_attr_name_free(&sn);
 
 		entry->next_entry_off = entry_size;
