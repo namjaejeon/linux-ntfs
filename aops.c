@@ -40,14 +40,22 @@ static void ntfs_iomap_read_end_io(struct bio *bio)
 #endif
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 1, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 2, 0)
 static void ntfs_iomap_bio_submit_read(const struct iomap_iter *iter,
-	struct iomap_read_folio_ctx *ctx)
+		struct iomap_read_folio_ctx *ctx)
+{
+	iomap_bio_submit_read_endio(iter, ctx, ntfs_iomap_read_end_io);
+}
+#else
+static void ntfs_iomap_bio_submit_read(const struct iomap_iter *iter,
+		struct iomap_read_folio_ctx *ctx)
 {
 	struct bio *bio = ctx->read_ctx;
+
 	bio->bi_end_io = ntfs_iomap_read_end_io;
 	submit_bio(bio);
 }
-
+#endif
 
 static const struct iomap_read_ops ntfs_iomap_bio_read_ops = {
 	.read_folio_range	= iomap_bio_read_folio_range,
