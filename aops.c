@@ -486,6 +486,8 @@ static int ntfs_writepages(struct address_space *mapping,
 #else
 	struct iomap_writepage_ctx wpc = { };
 #endif
+	bool need_iput = false;
+	int ret;
 
 	if (NVolShutdown(ni->vol))
 		return -EIO;
@@ -502,11 +504,24 @@ static int ntfs_writepages(struct address_space *mapping,
 		return -EOPNOTSUPP;
 	}
 
+	/*
+	 * Prevent eviction in writeback to avoid deadlock in
+	 * ntfs_drop_big_inode().
+	 */
+	if ((ni->type == AT_DATA || ni->type == AT_INDEX_ALLOCATION) &&
+	    igrab(inode))
+		need_iput = true;
+
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
-	return iomap_writepages(&wpc);
+	ret = iomap_writepages(&wpc);
 #else
-	return iomap_writepages(mapping, wbc, &wpc, &ntfs_writeback_ops);
+	ret = iomap_writepages(mapping, wbc, &wpc, &ntfs_writeback_ops);
 #endif
+
+	if (need_iput)
+		iput(inode);
+
+	return ret;
 }
 
 static int ntfs_swap_activate(struct swap_info_struct *sis,

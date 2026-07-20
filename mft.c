@@ -3215,7 +3215,7 @@ static int ntfs_write_mft_block(struct page *page, struct writeback_control *wbc
 	s64 vcn = (s64)page->index << PAGE_SHIFT >> vol->cluster_size_bits;
 	s64 end_vcn = ni->allocated_size >> vol->cluster_size_bits;
 	unsigned int page_sz;
-	struct runlist_element *rl;
+	struct runlist_element *rl = NULL;
 	loff_t i_size = i_size_read(vi);
 
 	ntfs_debug("Entering for inode 0x%llx, attribute type 0x%x, page index 0x%lx.",
@@ -3336,7 +3336,7 @@ flush_bio:
 
 			if (vol->cluster_size == NTFS_BLOCK_SIZE &&
 			    (mft_record_off ||
-			     rl->length - (vcn_off - rl->vcn) == 1 ||
+			     (rl && rl->length - (vcn_off - rl->vcn) == 1) ||
 			     mft_ofs + NTFS_BLOCK_SIZE >= PAGE_SIZE))
 				page_sz = NTFS_BLOCK_SIZE;
 			else
