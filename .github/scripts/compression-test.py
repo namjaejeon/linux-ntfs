@@ -15,7 +15,7 @@ SPARSE = 0x00000200
 XATTR = "system.ntfs_attrib"
 XATTR_BE = "system.ntfs_attrib_be"
 SUB_BLOCK = 4096
-COMPRESSION_UNIT = 16 * SUB_BLOCK
+COMPRESSION_UNIT = 0
 
 
 def attrs(path: Path, name: str = XATTR) -> int:
@@ -78,7 +78,7 @@ def prepare(root: Path, manifest_path: Path) -> None:
     manifest = {"files": {}, "must_uncompressed": []}
 
     # Both compressible and incompressible streams exercise LZNT1 and the
-    # uncompressed fallback around 4 KiB sub-block and 64 KiB unit boundaries.
+    # uncompressed fallback around sub-block and compression-unit boundaries.
     boundary_sizes = (
         0,
         1,
@@ -96,7 +96,12 @@ def prepare(root: Path, manifest_path: Path) -> None:
             record_file(manifest, root, f"random-{size}", deterministic_random(size, size))
 
     # A large zero extent should take the all-hole compressed-unit path.
-    record_file(manifest, root, "zeros-262144", bytes(4 * COMPRESSION_UNIT))
+    record_file(
+        manifest,
+        root,
+        f"zeros-{4 * COMPRESSION_UNIT}",
+        bytes(4 * COMPRESSION_UNIT),
+    )
 
     # Unaligned writes cross both sub-block and compression-unit boundaries.
     name = "unaligned-pwrite"
@@ -253,7 +258,10 @@ def verify(root: Path, manifest_path: Path) -> dict:
 
     # Confirm that the highly compressible streams are not merely flagged but
     # actually consume less disk space than their logical lengths.
-    for name in ("repeated-131329", "zeros-262144"):
+    for name in (
+        f"repeated-{2 * COMPRESSION_UNIT + 257}",
+        f"zeros-{4 * COMPRESSION_UNIT}",
+    ):
         stat = (root / name).stat()
         if stat.st_blocks * 512 >= stat.st_size:
             raise AssertionError(f"{name} was not stored compressed/sparse")
@@ -267,12 +275,12 @@ def mutate(root: Path, manifest_path: Path) -> None:
     # remount. This covers read-modify-write of existing compression units.
     for name, patches, suffix in (
         (
-            "random-65537",
+            f"random-{COMPRESSION_UNIT + 1}",
             ((SUB_BLOCK - 1, b"S" * 33), (COMPRESSION_UNIT - 8, b"boundary" * 5)),
             b"appended-after-remount",
         ),
         (
-            "repeated-131329",
+            f"repeated-{2 * COMPRESSION_UNIT + 257}",
             ((COMPRESSION_UNIT + 3, deterministic_random(5000, 29)),),
             b"tail",
         ),
@@ -298,11 +306,15 @@ def mutate(root: Path, manifest_path: Path) -> None:
 
 
 def main() -> None:
+    global COMPRESSION_UNIT
+
     parser = argparse.ArgumentParser()
     parser.add_argument("mode", choices=("prepare", "mutate", "verify"))
     parser.add_argument("mountpoint", type=Path)
     parser.add_argument("manifest", type=Path)
+    parser.add_argument("cluster_size", type=int, choices=(512, 1024, 2048, 4096))
     args = parser.parse_args()
+    COMPRESSION_UNIT = 16 * args.cluster_size
 
     if args.mode == "prepare":
         prepare(args.mountpoint, args.manifest)
@@ -311,7 +323,10 @@ def main() -> None:
     else:
         verify(args.mountpoint, args.manifest)
 
-    print(f"compression {args.mode} phase passed")
+    print(
+        f"compression {args.mode} phase passed "
+        f"(cluster size {args.cluster_size} bytes)"
+    )
 
 
 if __name__ == "__main__":

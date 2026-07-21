@@ -21,22 +21,30 @@ cleanup()
 }
 trap cleanup EXIT
 
-truncate -s 1G "$IMAGE"
-LOOP_DEVICE=$(losetup --find --show "$IMAGE")
-mkfs.ntfs -F "$LOOP_DEVICE" >/dev/null
-mount -t ntfs "$LOOP_DEVICE" "$MOUNTPOINT"
+for CLUSTER_SIZE in 4096 512; do
+	truncate -s 1G "$IMAGE"
+	LOOP_DEVICE=$(losetup --find --show "$IMAGE")
+	mkfs.ntfs -F -c "$CLUSTER_SIZE" "$LOOP_DEVICE" >/dev/null
+	mount -t ntfs "$LOOP_DEVICE" "$MOUNTPOINT"
 
-python3 "$SCRIPT_DIR/compression-test.py" prepare "$MOUNTPOINT" "$MANIFEST"
-sync
-umount "$MOUNTPOINT"
-mount -t ntfs "$LOOP_DEVICE" "$MOUNTPOINT"
+	python3 "$SCRIPT_DIR/compression-test.py" prepare \
+		"$MOUNTPOINT" "$MANIFEST" "$CLUSTER_SIZE"
+	sync
+	umount "$MOUNTPOINT"
+	mount -t ntfs "$LOOP_DEVICE" "$MOUNTPOINT"
 
-python3 "$SCRIPT_DIR/compression-test.py" mutate "$MOUNTPOINT" "$MANIFEST"
-sync
-umount "$MOUNTPOINT"
-mount -t ntfs "$LOOP_DEVICE" "$MOUNTPOINT"
+	python3 "$SCRIPT_DIR/compression-test.py" mutate \
+		"$MOUNTPOINT" "$MANIFEST" "$CLUSTER_SIZE"
+	sync
+	umount "$MOUNTPOINT"
+	mount -t ntfs "$LOOP_DEVICE" "$MOUNTPOINT"
 
-python3 "$SCRIPT_DIR/compression-test.py" verify "$MOUNTPOINT" "$MANIFEST"
-sync
-umount "$MOUNTPOINT"
-ntfsck -n "$LOOP_DEVICE"
+	python3 "$SCRIPT_DIR/compression-test.py" verify \
+		"$MOUNTPOINT" "$MANIFEST" "$CLUSTER_SIZE"
+	sync
+	umount "$MOUNTPOINT"
+	ntfsck -n "$LOOP_DEVICE"
+	losetup -d "$LOOP_DEVICE"
+	LOOP_DEVICE=""
+	rm -f "$IMAGE" "$MANIFEST"
+done
