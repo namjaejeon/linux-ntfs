@@ -2483,7 +2483,7 @@ int ntfs_show_options(struct seq_file *sf, struct dentry *root)
 }
 
 int ntfs_extend_initialized_size(struct inode *vi, const loff_t offset,
-				 const loff_t new_size, bool bsync)
+				 const loff_t new_size)
 {
 	struct ntfs_inode *ni = NTFS_I(vi);
 	loff_t old_init_size;
@@ -2522,10 +2522,6 @@ int ntfs_extend_initialized_size(struct inode *vi, const loff_t offset,
 #endif
 		if (err)
 			return err;
-		if (bsync)
-			err = filemap_write_and_wait_range(vi->i_mapping,
-							   old_init_size,
-							   offset - 1);
 	}
 
 
