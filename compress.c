@@ -97,33 +97,6 @@ void free_compression_buffers(void)
 }
 
 /*
- * zero_partial_compressed_page - zero out of bounds compressed page region
- * @page: page to zero
- * @initialized_size: initialized size of the attribute
- */
-static void zero_partial_compressed_page(struct page *page,
-		const s64 initialized_size)
-{
-	u8 *kp = page_address(page);
-	unsigned int kp_ofs;
-
-	ntfs_debug("Zeroing page region outside initialized size.");
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 16, 0)
-	if (((s64)page->__folio_index << PAGE_SHIFT) >= initialized_size) {
-		clear_page(kp);
-		return;
-	}
-#else
-	if (((s64)page->index << PAGE_SHIFT) >= initialized_size) {
-		clear_page(kp);
-		return;
-	}
-#endif
-	kp_ofs = initialized_size & ~PAGE_MASK;
-	memset(kp + kp_ofs, 0, PAGE_SIZE - kp_ofs);
-}
-
-/*
  * handle_bounds_compressed_page - test for&handle out of bounds compressed page
  * @page: page to check and handle
  * @i_size: file size
@@ -134,13 +107,22 @@ static inline void handle_bounds_compressed_page(struct page *page,
 {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 16, 0)
 	if ((page->__folio_index >= (initialized_size >> PAGE_SHIFT)) &&
-			(initialized_size < i_size))
-		zero_partial_compressed_page(page, initialized_size);
+			(initialized_size < i_size)) {
 #else
 	if ((page->index >= (initialized_size >> PAGE_SHIFT)) &&
-			(initialized_size < i_size))
-		zero_partial_compressed_page(page, initialized_size);
+			(initialized_size < i_size)) {
 #endif
+		u8 *kp = page_address(page);
+		unsigned int kp_ofs;
+
+		ntfs_debug("Zeroing page region outside initialized size.");
+		if (((s64)page->__folio_index << PAGE_SHIFT) >= initialized_size) {
+			clear_page(kp);
+			return;
+		}
+		kp_ofs = initialized_size & ~PAGE_MASK;
+		memset(kp + kp_ofs, 0, PAGE_SIZE - kp_ofs);
+	}
 }
 
 /*
