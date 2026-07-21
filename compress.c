@@ -461,7 +461,11 @@ int ntfs_read_compressed_block(struct page *page)
 #endif
 	loff_t i_size;
 	s64 initialized_size;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
+	struct address_space *mapping = folio->mapping;
+#else
 	struct address_space *mapping = page->mapping;
+#endif
 	struct ntfs_inode *ni = NTFS_I(mapping->host);
 	struct ntfs_volume *vol = ni->vol;
 	struct super_block *sb = vol->sb;
@@ -469,7 +473,7 @@ int ntfs_read_compressed_block(struct page *page)
 	unsigned long flags;
 	u8 *cb, *cb_pos, *cb_end;
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 16, 0)
-	unsigned long offset, index = page->__folio_index;
+	unsigned long offset, index = folio->index;
 #else
 	unsigned long offset, index = page->index;
 #endif
@@ -830,18 +834,26 @@ lock_retry_remap:
 	for (cur_page = 0; cur_page < max_page; cur_page++) {
 		page = pages[cur_page];
 		if (page) {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 16, 0)
+			folio = page_folio(page);
 			ntfs_error(vol->sb,
 				"Still have pages left! Terminating them with extreme prejudice.  Inode 0x%llx, page index 0x%lx.",
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 16, 0)
-				ni->mft_no, page->__folio_index);
+				ni->mft_no, folio->index);
+			flush_dcache_folio(folio);
+			kunmap_local(page_address(page));
+			folio_unlock(folio);
+			if (cur_page != xpage)
+				folio_put(folio);
 #else
+			ntfs_error(vol->sb,
+				"Still have pages left! Terminating them with extreme prejudice.  Inode 0x%llx, page index 0x%lx.",
 				ni->mft_no, page->index);
-#endif
 			flush_dcache_page(page);
 			kunmap_local(page_address(page));
 			unlock_page(page);
 			if (cur_page != xpage)
 				put_page(page);
+#endif
 			pages[cur_page] = NULL;
 		}
 	}
