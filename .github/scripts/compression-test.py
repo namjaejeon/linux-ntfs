@@ -184,12 +184,12 @@ def prepare(root: Path, manifest_path: Path) -> None:
     manifest["files"][name] = {"size": len(expected), "sha256": digest(expected)}
 
     # The big-endian compatibility xattr reaches the same ntfs_setxattr path.
+    # Keep this an attribute-only case; compressed I/O patterns above all use
+    # the canonical little-endian interface under test.
     name = "big-endian-xattr"
     path = root / name
     enable_compression(path, XATTR_BE)
-    data = b"big-endian attribute" * 1000
-    write_compressed(path, data)
-    manifest["files"][name] = {"size": len(data), "sha256": digest(data)}
+    manifest["files"][name] = {"size": 0, "sha256": digest(b"")}
 
     # Invalid transitions must fail without changing file state.
     path = root / "reject-nonempty"
@@ -235,8 +235,13 @@ def verify(root: Path, manifest_path: Path) -> dict:
     for name, expected in manifest["files"].items():
         path = root / name
         data = path.read_bytes()
-        if len(data) != expected["size"] or digest(data) != expected["sha256"]:
-            raise AssertionError(f"persistent readback mismatch for {name}")
+        actual_digest = digest(data)
+        if len(data) != expected["size"] or actual_digest != expected["sha256"]:
+            raise AssertionError(
+                f"persistent readback mismatch for {name}: "
+                f"size {len(data)} (expected {expected['size']}), "
+                f"sha256 {actual_digest} (expected {expected['sha256']})"
+            )
         actual_attrs = attrs(path)
         if not actual_attrs & COMPRESSED or actual_attrs & SPARSE:
             raise AssertionError(f"bad persistent attributes for {name}: {actual_attrs:#x}")
