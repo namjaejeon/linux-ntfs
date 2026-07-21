@@ -1104,10 +1104,9 @@ static void ntfs_skip_position(struct compress_context *pctx, const int i)
  * header (minimal size is 2, maximum size is 4098)
  * A negative error code if an error has been met.
  */
-static int ntfs_compress_block(const char *inbuf, const int bufsize,
-			       char *outbuf)
+static int ntfs_compress_block(struct compress_context *pctx,
+			       const char *inbuf, const int bufsize, char *outbuf)
 {
-	struct compress_context *pctx;
 	int i; /* current position */
 	int j; /* end of best match from current position */
 	int k; /* end of best match from next position */
@@ -1121,10 +1120,6 @@ static int ntfs_compress_block(const char *inbuf, const int bufsize,
 	char *ptag; /* location reserved for a tag */
 	int tag;    /* current value of tag */
 	int ntag;   /* count of bits still undefined in tag */
-
-	pctx = kvzalloc(sizeof(struct compress_context), GFP_NOFS);
-	if (!pctx)
-		return -ENOMEM;
 
 	/*
 	 * All hash chains start as empty.  The special value '-1' indicates the
@@ -1281,16 +1276,12 @@ static int ntfs_compress_block(const char *inbuf, const int bufsize,
 		xout = NTFS_SB_SIZE + 2;
 	}
 
-	/*
-	 * Free the compression context and return the total number of bytes
-	 * written to 'outbuf'.
-	 */
-	kvfree(pctx);
 	return xout;
 }
 
 static int ntfs_write_cb(struct ntfs_inode *ni, loff_t pos, struct page **pages,
-		int pages_per_cb, unsigned int page_offset)
+		int pages_per_cb, unsigned int page_offset,
+		struct compress_context *ctx)
 {
 	struct ntfs_volume *vol = ni->vol;
 	char *outbuf = NULL, *pbuf, *inbuf, *in_mapping;
@@ -1353,7 +1344,7 @@ static int ntfs_write_cb(struct ntfs_inode *ni, loff_t pos, struct page **pages,
 		else
 			bsz = insz - p;
 		pbuf = &outbuf[compsz];
-		sz = ntfs_compress_block(&inbuf[p], bsz, pbuf);
+		sz = ntfs_compress_block(ctx, &inbuf[p], bsz, pbuf);
 		if (sz < 0) {
 			err = sz;
 			goto out;
@@ -1508,6 +1499,7 @@ out:
 int ntfs_compress_write(struct ntfs_inode *ni, loff_t pos, size_t count,
 		struct iov_iter *from)
 {
+	struct compress_context *ctx;
 	struct folio *folio;
 	struct page **pages = NULL, *page;
 	int pages_per_cb;
@@ -1522,6 +1514,15 @@ int ntfs_compress_write(struct ntfs_inode *ni, loff_t pos, size_t count,
 	pages = kmalloc_array(pages_per_cb, sizeof(struct page *), GFP_NOFS);
 	if (!pages)
 		return -ENOMEM;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 0, 0)
+	ctx = kvzalloc_obj(*ctx, GFP_NOFS);
+#else
+	ctx = kvzalloc(sizeof(*ctx), GFP_NOFS);
+#endif
+	if (!ctx) {
+		kfree(pages);
+		return -ENOMEM;
+	}
 
 	while (count) {
 		pgoff_t index;
@@ -1595,7 +1596,7 @@ int ntfs_compress_write(struct ntfs_inode *ni, loff_t pos, size_t count,
 			goto release_pages;
 		}
 
-		err = ntfs_write_cb(ni, pos, pages, pages_per_cb, page_offset);
+		err = ntfs_write_cb(ni, pos, pages, pages_per_cb, page_offset, ctx);
 		if (!err && pos + copied > ni->initialized_size) {
 			mutex_lock(&ni->mrec_lock);
 			err = ntfs_attr_set_initialized_size(ni, pos + copied);
@@ -1625,6 +1626,7 @@ release_pages:
 	}
 
 out:
+	kvfree(ctx);
 	kfree(pages);
 	if (err < 0)
 		written = err;
