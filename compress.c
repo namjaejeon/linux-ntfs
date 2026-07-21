@@ -1537,6 +1537,7 @@ int ntfs_compress_write(struct ntfs_inode *ni, loff_t pos, size_t count,
 		pgoff_t index;
 		size_t copied, bytes;
 		unsigned int page_offset;
+		bool full_cb;
 		int off;
 
 		off = pos & (cb_size - 1);
@@ -1548,14 +1549,20 @@ int ntfs_compress_write(struct ntfs_inode *ni, loff_t pos, size_t count,
 		page_offset = offset_in_page(cb_off);
 		pages_per_cb = DIV_ROUND_UP(page_offset + cb_size, PAGE_SIZE);
 		index = cb_off >> PAGE_SHIFT;
+		full_cb = !off && bytes == cb_size && !page_offset &&
+				!(cb_size & (PAGE_SIZE - 1));
 
 		if (unlikely(fault_in_iov_iter_readable(from, bytes))) {
 			err = -EFAULT;
 			goto out;
 		}
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0)
 		for (i = 0; i < pages_per_cb; i++) {
-			folio = read_mapping_folio(mapping, index + i, NULL);
+			if (full_cb)
+				folio = filemap_grab_folio(mapping, index + i);
+			else
+				folio = read_mapping_folio(mapping, index + i, NULL);
 			if (IS_ERR(folio)) {
 				for (ip = 0; ip < i; ip++) {
 					folio_unlock(page_folio(pages[ip]));
@@ -1565,9 +1572,41 @@ int ntfs_compress_write(struct ntfs_inode *ni, loff_t pos, size_t count,
 				goto out;
 			}
 
+			if (!full_cb)
+				folio_lock(folio);
+			pages[i] = folio_page(folio, 0);
+		}
+#else
+		for (i = 0; i < pages_per_cb; i++) {
+			if (full_cb) {
+				page = find_or_create_page(mapping, index + i,
+						mapping_gfp_mask(mapping));
+				if (!page) {
+					err = -ENOMEM;
+					for (ip = 0; ip < i; ip++) {
+						folio_unlock(page_folio(pages[ip]));
+						folio_put(page_folio(pages[ip]));
+					}
+					goto out;
+				}
+				pages[i] = page;
+				continue;
+			}
+
+			folio = read_mapping_folio(mapping, index + i, NULL);
+			if (IS_ERR(folio)) {
+				err = PTR_ERR(folio);
+				for (ip = 0; ip < i; ip++) {
+					folio_unlock(page_folio(pages[ip]));
+					folio_put(page_folio(pages[ip]));
+				}
+				goto out;
+			}
+
 			folio_lock(folio);
 			pages[i] = folio_page(folio, 0);
 		}
+#endif
 
 		WARN_ON(!bytes);
 		copied = 0;
