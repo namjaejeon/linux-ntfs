@@ -114,6 +114,9 @@ jobs:
         sudo mkdir -p /mnt/scratch
         sudo mkdir -p /mnt/test
         sudo mkdir -p full_test
+    - name: compressed read/write tests
+      run: |
+        sudo bash .github/scripts/run-compression-tests.sh
     - name: create file/director test
       run: |
         truncate -s 10G full_test.img
