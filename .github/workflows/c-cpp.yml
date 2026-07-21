@@ -93,7 +93,7 @@ jobs:
         sudo apt-get install xfslibs-dev uuid-dev libtool-bin xfsprogs libgdbm-dev gawk fio attr libattr1-dev libacl1-dev libaio-dev
         sudo apt-get install libgcrypt20-dev
         git clone https://github.com/namjaejeon/exfat-testsuites
-        git clone https://github.com/ntfsprogs-plus/ntfsprogs-plus
+        git clone --branch=ntfs-next https://github.com/ntfsprogs-plus/ntfsprogs-plus
         export LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH
         export PATH=/usr/local/lib:$PATH
         sudo useradd fsgqa
