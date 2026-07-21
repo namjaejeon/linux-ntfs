@@ -57,12 +57,17 @@ def deterministic_random(size: int, seed: int) -> bytes:
     return random.Random(seed).randbytes(size)
 
 
+def write_compressed(path: Path, data: bytes) -> None:
+    """Write without O_TRUNC, which compressed files do not support."""
+    with path.open("r+b", buffering=0) as output:
+        output.write(data)
+        os.fsync(output.fileno())
+
+
 def record_file(manifest: dict, root: Path, name: str, data: bytes) -> None:
     path = root / name
     enable_compression(path)
-    with path.open("wb", buffering=0) as output:
-        output.write(data)
-        os.fsync(output.fileno())
+    write_compressed(path, data)
     actual = path.read_bytes()
     if actual != data:
         raise AssertionError(f"immediate readback mismatch for {name}")
@@ -120,7 +125,6 @@ def prepare(root: Path, manifest_path: Path) -> None:
     enable_compression(path)
     expected = bytearray(4 * COMPRESSION_UNIT + 123)
     with path.open("r+b", buffering=0) as output:
-        output.truncate(len(expected))
         for offset, value in (
             (0, b"head"),
             (COMPRESSION_UNIT + 31, b"middle"),
@@ -133,20 +137,35 @@ def prepare(root: Path, manifest_path: Path) -> None:
         raise AssertionError("sparse compressed file readback mismatch")
     manifest["files"][name] = {"size": len(expected), "sha256": digest(expected)}
 
-    # Shrinking inside a unit followed by extension must expose zeroes only.
-    name = "truncate-shrink-grow"
+    # ATTR_SIZE changes are currently unsupported for compressed files.  In
+    # particular, opening one with O_TRUNC must fail without losing its data.
+    name = "reject-truncate"
     path = root / name
     enable_compression(path)
-    expected = bytearray(deterministic_random(3 * COMPRESSION_UNIT, 11))
-    with path.open("r+b", buffering=0) as output:
-        output.write(expected)
-        output.truncate(COMPRESSION_UNIT + 17)
-        del expected[COMPRESSION_UNIT + 17 :]
-        output.truncate(2 * COMPRESSION_UNIT + 123)
-        expected.extend(bytes(2 * COMPRESSION_UNIT + 123 - len(expected)))
-        os.fsync(output.fileno())
+    expected = deterministic_random(3 * COMPRESSION_UNIT, 11)
+    write_compressed(path, expected)
+    for new_size in (COMPRESSION_UNIT + 17, 4 * COMPRESSION_UNIT):
+        try:
+            os.truncate(path, new_size)
+        except OSError as error:
+            if error.errno != errno.EOPNOTSUPP:
+                raise AssertionError(
+                    f"truncate to {new_size}: expected EOPNOTSUPP, "
+                    f"got errno {error.errno}"
+                ) from error
+        else:
+            raise AssertionError(f"truncate to {new_size} unexpectedly succeeded")
+    try:
+        path.open("wb").close()
+    except OSError as error:
+        if error.errno != errno.EOPNOTSUPP:
+            raise AssertionError(
+                f"O_TRUNC: expected EOPNOTSUPP, got errno {error.errno}"
+            ) from error
+    else:
+        raise AssertionError("O_TRUNC unexpectedly succeeded")
     if path.read_bytes() != expected:
-        raise AssertionError("truncate readback mismatch")
+        raise AssertionError("rejected truncate changed compressed data")
     manifest["files"][name] = {"size": len(expected), "sha256": digest(expected)}
 
     # Replacing an allocated, incompressible unit with zeroes exercises the
@@ -169,9 +188,7 @@ def prepare(root: Path, manifest_path: Path) -> None:
     path = root / name
     enable_compression(path, XATTR_BE)
     data = b"big-endian attribute" * 1000
-    path.write_bytes(data)
-    with path.open("rb") as stream:
-        os.fsync(stream.fileno())
+    write_compressed(path, data)
     manifest["files"][name] = {"size": len(data), "sha256": digest(data)}
 
     # Invalid transitions must fail without changing file state.
@@ -194,7 +211,7 @@ def prepare(root: Path, manifest_path: Path) -> None:
 
     path = root / "reject-clear-nonempty"
     enable_compression(path)
-    path.write_bytes(b"compressed data")
+    write_compressed(path, b"compressed data")
     expect_setxattr_error(path, struct.pack("=I", 0), errno.EOPNOTSUPP)
     manifest["files"][path.name] = {
         "size": path.stat().st_size,
