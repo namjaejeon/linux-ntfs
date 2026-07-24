@@ -49,7 +49,7 @@ static inline int ntfs_check_bad_char(const __le16 *wc, unsigned int wc_len)
 
 		if (c < 0x0020 ||
 		    c == 0x0022 || c == 0x002A || c == 0x002F ||
-		    c == 0x003A || c == 0x003C || c == 0x003E ||
+		    c == 0x003C || c == 0x003E ||
 		    c == 0x003F || c == 0x005C || c == 0x007C)
 			return -EINVAL;
 	}
