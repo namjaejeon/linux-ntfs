@@ -397,14 +397,17 @@ int ntfs_setattr(struct user_namespace *mnt_userns, struct dentry *dentry,
 		if (ia_valid & ATTR_MODE)
 			flags |= NTFS_EA_MODE;
 
+		mutex_lock(&ni->mrec_lock);
+		err = ntfs_ea_set_wsl_inode(vi, 0, NULL, flags);
+		mutex_unlock(&ni->mrec_lock);
+		if (err)
+			goto out;
+
+		/* Apply mount masks after saving the unmasked POSIX mode. */
 		if (S_ISDIR(vi->i_mode))
 			vi->i_mode &= ~vol->dmask;
 		else
 			vi->i_mode &= ~vol->fmask;
-
-		mutex_lock(&ni->mrec_lock);
-		ntfs_ea_set_wsl_inode(vi, 0, NULL, flags);
-		mutex_unlock(&ni->mrec_lock);
 	}
 
 	mark_inode_dirty(vi);
