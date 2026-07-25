@@ -430,8 +430,6 @@ static struct ntfs_inode *__ntfs_create(struct user_namespace *mnt_userns, struc
 	 * directories, also setup the index values to the defaults.
 	 */
 	if (S_ISDIR(mode)) {
-		mode &= ~vol->dmask;
-
 		NInoSetMstProtected(ni);
 		ni->itype.index.block_size = 4096;
 		ni->itype.index.block_size_bits = ntfs_ffs(4096) - 1;
@@ -445,8 +443,6 @@ static struct ntfs_inode *__ntfs_create(struct user_namespace *mnt_userns, struc
 			ni->itype.index.vcn_size_bits =
 				vol->sector_size_bits;
 		}
-	} else {
-		mode &= ~vol->fmask;
 	}
 
 	if (IS_RDONLY(vi))
