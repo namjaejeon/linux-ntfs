@@ -3885,10 +3885,12 @@ int ntfs_attr_update_mapping_pairs(struct ntfs_inode *ni, s64 from_vcn)
 	struct ntfs_inode *base_ni;
 	struct mft_record *m;
 	struct attr_record *a;
-	s64 stop_vcn;
+	s64 stop_vcn, new_compr_size;
 	int err = 0, mp_size, cur_max_mp_size, exp_max_mp_size;
+	int sparse;
 	bool finished_build;
 	bool first_updated = false;
+	bool partial_update;
 	struct super_block *sb;
 	struct runlist_element *start_rl;
 	unsigned int de_cluster_count = 0;
@@ -3906,6 +3908,37 @@ retry:
 		return -EINVAL;
 	}
 
+	/*
+	 * A partial mapping-pairs update can skip the base attribute extent,
+	 * where ntfs_attr_update_meta() normally updates sparse state and
+	 * compressed_size.  Fall back to a full update when the record layout
+	 * may change.  Otherwise refresh compressed_size from the complete
+	 * runlist before the base extent is updated below.
+	 */
+	if (from_vcn) {
+		if (NInoCompressed(ni)) {
+			from_vcn = 0;
+		} else {
+			sparse = ntfs_rl_sparse(ni->runlist.rl);
+			if (sparse < 0)
+				return sparse;
+
+			if (!!sparse != NInoSparse(ni)) {
+				from_vcn = 0;
+			} else if (sparse) {
+				if (!NInoFullyMapped(ni)) {
+					from_vcn = 0;
+				} else {
+					new_compr_size = ntfs_rl_get_compressed_size(
+							ni->vol, ni->runlist.rl);
+					if (new_compr_size < 0)
+						return new_compr_size;
+					ni->itype.compressed.size = new_compr_size;
+				}
+			}
+		}
+	}
+
 	if (ni->nr_extents == -1)
 		base_ni = ni->ext.base_ntfs_ino;
 	else
@@ -3916,6 +3949,34 @@ retry:
 		ntfs_error(sb, "%s: Failed to get search context", __func__);
 		return -ENOMEM;
 	}
+
+	/*
+	 * @from_vcn must be covered by an existing on-disk attribute extent.
+	 * A newly appended or otherwise uncovered VCN cannot be used to seed
+	 * extent enumeration, so rebuild from the base extent in that case.
+	 */
+	if (from_vcn) {
+		err = ntfs_attr_lookup(ni->type, ni->name, ni->name_len,
+				CASE_SENSITIVE, from_vcn, NULL, 0, ctx);
+		if (!err) {
+			s64 highest_vcn = le64_to_cpu(
+					ctx->attr->data.non_resident.highest_vcn);
+			s64 lowest_vcn = le64_to_cpu(
+					ctx->attr->data.non_resident.lowest_vcn);
+
+			if (!lowest_vcn || from_vcn < lowest_vcn ||
+			    from_vcn > highest_vcn)
+				from_vcn = 0;
+		} else if (err == -ENOENT) {
+			from_vcn = 0;
+		} else {
+			ntfs_error(sb, "%s: Failed to find starting extent",
+					__func__);
+			goto put_err_out;
+		}
+		ntfs_attr_reinit_search_ctx(ctx);
+	}
+	partial_update = from_vcn != 0;
 
 	/* Fill attribute records with new mapping pairs. */
 	stop_vcn = 0;
@@ -4218,7 +4279,7 @@ retry:
 			break;
 	}
 out:
-	if (from_vcn == 0)
+	if (!partial_update)
 		ni->i_dealloc_clusters = de_cluster_count;
 	return 0;
 
@@ -5317,7 +5378,7 @@ int ntfs_attr_map_cluster(struct ntfs_inode *ni, s64 vcn_start, s64 *lcn_start,
 		}
 	} else {
 		VFS_I(ni)->i_blocks += clu_count << (vol->cluster_size_bits - 9);
-		NInoSetRunlistDirty(ni);
+		ntfs_mark_runlist_dirty(ni, vcn);
 		mark_mft_record_dirty(ni);
 	}
 
@@ -5899,13 +5960,20 @@ int ntfs_attr_fallocate(struct ntfs_inode *ni, loff_t start, loff_t byte_len, bo
 	}
 
 	if (NInoRunlistDirty(ni)) {
+		s64 from_vcn;
+
 		mutex_lock_nested(&ni->mrec_lock, NTFS_INODE_MUTEX_NORMAL);
 		down_write(&ni->runlist.lock);
-		err = ntfs_attr_update_mapping_pairs(ni, 0);
-		if (err)
-			ntfs_error(ni->vol->sb, "Updating mapping pairs failed");
-		else
-			NInoClearRunlistDirty(ni);
+		if (NInoRunlistDirty(ni)) {
+			from_vcn = ni->runlist_dirty_vcn;
+			err = ntfs_attr_update_mapping_pairs(ni, from_vcn);
+			if (err)
+				ntfs_error(ni->vol->sb, "Updating mapping pairs failed");
+			else {
+				NInoClearRunlistDirty(ni);
+				ni->runlist_dirty_vcn = 0;
+			}
+		}
 		up_write(&ni->runlist.lock);
 		mutex_unlock(&ni->mrec_lock);
 	}

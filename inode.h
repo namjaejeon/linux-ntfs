@@ -148,6 +148,7 @@ struct ntfs_inode {
 		struct ntfs_inode **extent_ntfs_inos;
 		struct ntfs_inode *base_ntfs_ino;
 	} ext;
+	s64 runlist_dirty_vcn;
 	unsigned int i_dealloc_clusters;
 	__le32 reparse_tag;
 	__le32 reparse_flags;
@@ -264,6 +265,18 @@ TAS_NINO_FNS(FileNameDirty)
 NINO_FNS(BeingDeleted)
 NINO_FNS(HasEA)
 NINO_FNS(RunlistDirty)
+
+/* Caller must hold ni->runlist.lock for writing. */
+static inline void ntfs_mark_runlist_dirty(struct ntfs_inode *ni, s64 vcn)
+{
+	/* The preceding run may be extended or merged by this allocation. */
+	if (vcn > 0)
+		vcn--;
+
+	if (!NInoRunlistDirty(ni) || vcn < ni->runlist_dirty_vcn)
+		ni->runlist_dirty_vcn = vcn;
+	NInoSetRunlistDirty(ni);
+}
 
 /*
  * The full structure containing a ntfs_inode and a vfs struct inode. Used for

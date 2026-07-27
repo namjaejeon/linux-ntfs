@@ -2882,9 +2882,15 @@ int __ntfs_write_inode(struct inode *vi, int sync)
 
 	if (NInoNonResident(ni) && NInoRunlistDirty(ni)) {
 		down_write(&ni->runlist.lock);
-		err = ntfs_attr_update_mapping_pairs(ni, 0);
-		if (!err)
-			NInoClearRunlistDirty(ni);
+		if (NInoRunlistDirty(ni)) {
+			s64 from_vcn = ni->runlist_dirty_vcn;
+
+			err = ntfs_attr_update_mapping_pairs(ni, from_vcn);
+			if (!err) {
+				NInoClearRunlistDirty(ni);
+				ni->runlist_dirty_vcn = 0;
+			}
+		}
 		up_write(&ni->runlist.lock);
 	}
 
