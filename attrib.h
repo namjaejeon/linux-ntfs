@@ -15,6 +15,34 @@
 
 extern __le16 AT_UNNAMED[];
 
+struct ntfs_attrlist_cursor {
+	u32 off;
+	u64 gen;
+	bool valid;
+};
+
+struct ntfs_attrlist_anchor {
+	u32 off;
+	u64 gen;
+	bool valid;
+	bool at_end;
+};
+
+struct ntfs_attrlist_exact_key {
+	__le32 type;
+	__le64 lowest_vcn;
+	__le64 mft_reference;
+	__le16 instance;
+	u8 name_len;
+};
+
+struct ntfs_attrlist_exact {
+	u32 off;
+	u64 gen;
+	bool valid;
+	struct ntfs_attrlist_exact_key key;
+};
+
 /*
  * ntfs_attr_search_ctx - used in attribute search functions
  * @mrec: buffer containing mft record to search
@@ -22,10 +50,12 @@ extern __le16 AT_UNNAMED[];
  * @attr: attribute record in @mrec where to begin/continue search
  * @is_first: if true ntfs_attr_lookup() begins search with @attr, else after
  * @ntfs_ino: Inode owning this attribute search
- * @al_entry: Current attribute list entry
  * @base_ntfs_ino: Base inode
  * @mapped_base_mrec: true if @base_mrec was mapped by the search
  * @base_attr: Base attribute record pointer
+ * @al_cursor: Restartable attr-list enumeration cursor
+ * @al_insert: Insert-before anchor used on -ENOENT
+ * @al_exact: Exact ALE identity for writer-side updates
  *
  * Structure must be initialized to zero before the first call to one of the
  * attribute search functions. Initialize @mrec to point to the mft record to
@@ -45,11 +75,13 @@ struct ntfs_attr_search_ctx {
 	struct attr_record *attr;
 	bool is_first;
 	struct ntfs_inode *ntfs_ino;
-	struct attr_list_entry *al_entry;
 	struct ntfs_inode *base_ntfs_ino;
 	struct mft_record *base_mrec;
 	bool mapped_base_mrec;
 	struct attr_record *base_attr;
+	struct ntfs_attrlist_cursor al_cursor;
+	struct ntfs_attrlist_anchor al_insert;
+	struct ntfs_attrlist_exact al_exact;
 };
 
 enum {                  /* ways of processing holes when expanding */
@@ -89,6 +121,14 @@ void ntfs_attr_reinit_search_ctx(struct ntfs_attr_search_ctx *ctx);
 struct ntfs_attr_search_ctx *ntfs_attr_get_search_ctx(struct ntfs_inode *ni,
 		struct mft_record *mrec);
 void ntfs_attr_put_search_ctx(struct ntfs_attr_search_ctx *ctx);
+void ntfs_attrlist_reset_locators(struct ntfs_attr_search_ctx *ctx);
+void ntfs_attrlist_capture_exact(struct ntfs_attr_search_ctx *ctx,
+				 struct ntfs_inode *base_ni,
+				 struct attr_list_entry *ale, u8 *al_start);
+void ntfs_attrlist_exact_key_from_ale(struct ntfs_attrlist_exact_key *key,
+				      const struct attr_list_entry *ale);
+bool ntfs_attrlist_exact_key_eq(const struct attr_list_entry *ale,
+				const struct ntfs_attrlist_exact_key *key);
 int ntfs_attr_size_bounds_check(const struct ntfs_volume *vol,
 		const __le32 type, const s64 size);
 int ntfs_attr_can_be_resident(const struct ntfs_volume *vol,

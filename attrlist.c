@@ -182,15 +182,16 @@ int ntfs_attrlist_entry_add(struct ntfs_inode *ni, struct attr_record *attr)
 			0 : le32_to_cpu(attr->data.resident.value_length), ctx);
 	if (!err) {
 		/* Found some extent, check it to be before new extent. */
-		if (ctx->al_entry->lowest_vcn == lowest_vcn) {
+		if (ctx->al_exact.key.lowest_vcn == lowest_vcn) {
 			err = -EEXIST;
 			ntfs_debug("Such attribute already present in the attribute list.\n");
 			ntfs_attr_put_search_ctx(ctx);
 			goto err_out;
 		}
 		/* Add new entry after this extent. */
-		ale = (struct attr_list_entry *)((u8 *)ctx->al_entry +
-				le16_to_cpu(ctx->al_entry->length));
+		entry_offset = ctx->al_exact.off +
+			le16_to_cpu(((struct attr_list_entry *)(ni->attr_list +
+								ctx->al_exact.off))->length);
 	} else {
 		/* Check for real errors. */
 		if (err != -ENOENT) {
@@ -199,13 +200,11 @@ int ntfs_attrlist_entry_add(struct ntfs_inode *ni, struct attr_record *attr)
 			goto err_out;
 		}
 		/* No previous extents found. */
-		ale = ctx->al_entry;
+		entry_offset = ctx->al_insert.off;
 	}
 	/* Don't need it anymore, @ctx->al_entry points to @ni->attr_list. */
 	ntfs_attr_put_search_ctx(ctx);
 
-	/* Determine new entry offset. */
-	entry_offset = ((u8 *)ale - ni->attr_list);
 	/* Set pointer to new entry. */
 	ale = (struct attr_list_entry *)(new_al + entry_offset);
 	memset(ale, 0, entry_len);
@@ -261,7 +260,7 @@ int ntfs_attrlist_entry_rm(struct ntfs_attr_search_ctx *ctx)
 	struct ntfs_inode *base_ni;
 	struct attr_list_entry *ale;
 
-	if (!ctx || !ctx->ntfs_ino || !ctx->al_entry) {
+	if (!ctx || !ctx->ntfs_ino || !ctx->al_exact.valid) {
 		ntfs_debug("Invalid arguments.\n");
 		return -EINVAL;
 	}
@@ -270,12 +269,14 @@ int ntfs_attrlist_entry_rm(struct ntfs_attr_search_ctx *ctx)
 		base_ni = ctx->base_ntfs_ino;
 	else
 		base_ni = ctx->ntfs_ino;
-	ale = ctx->al_entry;
+	if (ctx->al_exact.off >= base_ni->attr_list_size)
+		return -EIO;
+	ale = (struct attr_list_entry *)(base_ni->attr_list + ctx->al_exact.off);
 
 	ntfs_debug("Entering for inode 0x%llx, attr 0x%x, lowest_vcn %lld.\n",
-			(long long)ctx->ntfs_ino->mft_no,
-			(unsigned int)le32_to_cpu(ctx->al_entry->type),
-			(long long)le64_to_cpu(ctx->al_entry->lowest_vcn));
+		   (long long)ctx->ntfs_ino->mft_no,
+		   (unsigned int)le32_to_cpu(ctx->al_exact.key.type),
+		   (long long)le64_to_cpu(ctx->al_exact.key.lowest_vcn));
 
 	if (!NInoAttrList(base_ni)) {
 		ntfs_debug("Attribute list isn't present.\n");
