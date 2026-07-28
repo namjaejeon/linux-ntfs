@@ -515,6 +515,8 @@ void __ntfs_init_inode(struct super_block *sb, struct ntfs_inode *ni)
 	ni->page_ofs = 0;
 #endif
 	ni->mrec = NULL;
+	init_rwsem(&ni->attr_list_lock);
+	ni->attr_list_gen = 0;
 	ni->attr_list_size = 0;
 	ni->attr_list = NULL;
 	ni->itype.index.block_size = 0;
@@ -3458,19 +3460,25 @@ static int ntfs_attr_position(__le32 type, struct ntfs_attr_search_ctx *ctx)
 		if (atype == AT_END)
 			return -ENOSPC;
 
-		/*
-		 * if ntfs_external_attr_lookup return -ENOENT, ctx->al_entry
-		 * could point to an attribute in an extent mft record, but
-		 * ctx->attr and ctx->ntfs_ino always points to an attibute in
-		 * a base mft record.
-		 */
-		if (ctx->al_entry &&
-		    MREF_LE(ctx->al_entry->mft_reference) != ctx->ntfs_ino->mft_no) {
-			ntfs_attr_reinit_search_ctx(ctx);
-			err = ntfs_attr_lookup(atype, NULL, 0, CASE_SENSITIVE, 0, NULL,
-					       0, ctx);
-			if (err)
-				return err;
+		if (ctx->al_insert.valid && !ctx->al_insert.at_end &&
+		    ctx->al_insert.off < ntfs_inode_base(ctx->ntfs_ino)->attr_list_size) {
+			struct ntfs_inode *base_ni =
+				ntfs_inode_base(ctx->ntfs_ino);
+			struct attr_list_entry *ale =
+				(struct attr_list_entry *)(base_ni->attr_list +
+							   ctx->al_insert.off);
+
+			if (MREF_LE(ale->mft_reference) != ctx->ntfs_ino->mft_no) {
+				ntfs_attr_reinit_search_ctx(ctx);
+				err = ntfs_attr_lookup(atype, NULL, 0,
+						       CASE_SENSITIVE, 0, NULL,
+						       0, ctx);
+				if (err)
+					return err;
+			} else {
+				ntfs_attrlist_capture_exact(ctx, base_ni, ale,
+							    base_ni->attr_list);
+			}
 		}
 	}
 	return 0;

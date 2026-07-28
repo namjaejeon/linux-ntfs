@@ -33,6 +33,97 @@
 
 __le16 AT_UNNAMED[] = { cpu_to_le16('\0') };
 
+void ntfs_attrlist_reset_locators(struct ntfs_attr_search_ctx *ctx)
+{
+	ctx->al_cursor = (struct ntfs_attrlist_cursor){ 0 };
+	ctx->al_insert = (struct ntfs_attrlist_anchor){ 0 };
+	ctx->al_exact = (struct ntfs_attrlist_exact){ 0 };
+}
+
+void ntfs_attrlist_capture_exact(struct ntfs_attr_search_ctx *ctx,
+				 struct ntfs_inode *base_ni,
+				 struct attr_list_entry *ale, u8 *al_start)
+{
+	ctx->al_exact.off = (u8 *)ale - al_start;
+	ctx->al_exact.gen = base_ni->attr_list_gen;
+	ctx->al_exact.valid = true;
+	ntfs_attrlist_exact_key_from_ale(&ctx->al_exact.key, ale);
+}
+
+static void ntfs_attrlist_capture_insert(struct ntfs_attr_search_ctx *ctx,
+					 struct ntfs_inode *base_ni,
+					 struct attr_list_entry *ale,
+					 u8 *al_start, u8 *al_end)
+{
+	ctx->al_insert.off = (u8 *)ale - al_start;
+	ctx->al_insert.gen = base_ni->attr_list_gen;
+	ctx->al_insert.valid = true;
+	ctx->al_insert.at_end = ((u8 *)ale == al_end);
+}
+
+void ntfs_attrlist_exact_key_from_ale(struct ntfs_attrlist_exact_key *key,
+				      const struct attr_list_entry *ale)
+{
+	key->type = ale->type;
+	key->lowest_vcn = ale->lowest_vcn;
+	key->mft_reference = ale->mft_reference;
+	key->instance = ale->instance;
+	key->name_len = ale->name_length;
+}
+
+bool ntfs_attrlist_exact_key_eq(const struct attr_list_entry *ale,
+				const struct ntfs_attrlist_exact_key *key)
+{
+	if (ale->type != key->type)
+		return false;
+	if (ale->lowest_vcn != key->lowest_vcn)
+		return false;
+	if (ale->mft_reference != key->mft_reference)
+		return false;
+	if (ale->instance != key->instance)
+		return false;
+
+	return ale->name_length == key->name_len;
+}
+
+static struct attr_list_entry *ntfs_attrlist_find_exact_locked(struct ntfs_inode *base_ni,
+							       struct ntfs_attrlist_exact *exact)
+{
+	struct attr_list_entry *ale;
+	u8 *al_end;
+
+	if (!exact->valid || !base_ni->attr_list)
+		return NULL;
+
+	al_end = base_ni->attr_list + base_ni->attr_list_size;
+	if (exact->gen == base_ni->attr_list_gen &&
+	    exact->off < base_ni->attr_list_size) {
+		ale = (struct attr_list_entry *)(base_ni->attr_list + exact->off);
+
+		if (ntfs_attr_list_entry_is_valid(ale, al_end) &&
+		    ntfs_attrlist_exact_key_eq(ale, &exact->key))
+			return ale;
+	}
+
+	for (ale = (struct attr_list_entry *)base_ni->attr_list;
+	     ntfs_attr_list_entry_is_valid(ale, al_end);
+	     ale = (struct attr_list_entry *)((u8 *)ale +
+					      le16_to_cpu(ale->length))) {
+		if (ntfs_attrlist_exact_key_eq(ale, &exact->key))
+			return ale;
+	}
+
+	return NULL;
+}
+
+static struct ntfs_inode *ntfs_attr_ctx_base_ni(struct ntfs_attr_search_ctx *ctx)
+{
+	if (ctx->ntfs_ino->nr_extents == -1)
+		return ctx->base_ntfs_ino;
+
+	return ctx->ntfs_ino;
+}
+
 /*
  * Maximum size allowed for reading attributes by ntfs_attr_readall().
  * Extended attribute, reparse point are not expected to be larger than this size.
@@ -1148,6 +1239,7 @@ static int ntfs_external_attr_find(const __le32 type,
 	u32 al_name_len;
 	u32 attr_len, mft_free_len;
 	bool is_first_search = false;
+	bool attr_list_locked = true;
 	int err = 0;
 	static const char *es = " Unmount and run chkdsk.";
 
@@ -1163,10 +1255,15 @@ static int ntfs_external_attr_find(const __le32 type,
 	if (type == AT_END)
 		goto not_found;
 	vol = base_ni->vol;
+	down_read(&base_ni->attr_list_lock);
 	al_start = base_ni->attr_list;
 	al_end = al_start + base_ni->attr_list_size;
-	if (!ctx->al_entry) {
-		ctx->al_entry = (struct attr_list_entry *)al_start;
+	if (!ctx->al_cursor.valid ||
+	    ctx->al_cursor.gen != base_ni->attr_list_gen ||
+	    ctx->al_cursor.off >= base_ni->attr_list_size) {
+		ctx->al_cursor.off = 0;
+		ctx->al_cursor.gen = base_ni->attr_list_gen;
+		ctx->al_cursor.valid = true;
 		is_first_search = true;
 	}
 	/*
@@ -1174,7 +1271,7 @@ static int ntfs_external_attr_find(const __le32 type,
 	 * or the entry following that, if @ctx->is_first is 'true'.
 	 */
 	if (ctx->is_first) {
-		al_entry = ctx->al_entry;
+		al_entry = (struct attr_list_entry *)(al_start + ctx->al_cursor.off);
 		ctx->is_first = false;
 		/*
 		 * If an enumeration and the first attribute is higher than
@@ -1187,14 +1284,14 @@ static int ntfs_external_attr_find(const __le32 type,
 			goto find_attr_list_attr;
 	} else {
 		/* Check for small entry */
-		if (((al_end - (u8 *)ctx->al_entry) <
-		      (long)offsetof(struct attr_list_entry, name)) ||
-		    (le16_to_cpu(ctx->al_entry->length) & 7) ||
-		    (le16_to_cpu(ctx->al_entry->length) < offsetof(struct attr_list_entry, name)))
+		al_entry = (struct attr_list_entry *)(al_start + ctx->al_cursor.off);
+		if (((al_end - (u8 *)al_entry) < (long)offsetof(struct attr_list_entry, name)) ||
+		    (le16_to_cpu(al_entry->length) & 7) ||
+		    (le16_to_cpu(al_entry->length) < offsetof(struct attr_list_entry, name)))
 			goto corrupt;
 
-		al_entry = (struct attr_list_entry *)((u8 *)ctx->al_entry +
-				le16_to_cpu(ctx->al_entry->length));
+		al_entry = (struct attr_list_entry *)((u8 *)al_entry +
+						      le16_to_cpu(al_entry->length));
 
 		if ((u8 *)al_entry == al_end)
 			goto not_found;
@@ -1210,15 +1307,18 @@ static int ntfs_external_attr_find(const __le32 type,
 		 * attribute list attribute from the base mft record as it is
 		 * not listed in the attribute list itself.
 		 */
-		if ((type == AT_UNUSED) && le32_to_cpu(ctx->al_entry->type) <
-				le32_to_cpu(AT_ATTRIBUTE_LIST) &&
-				le32_to_cpu(al_entry->type) >
-				le32_to_cpu(AT_ATTRIBUTE_LIST)) {
+		if ((type == AT_UNUSED) &&
+		    le32_to_cpu(((struct attr_list_entry *)(al_start +
+							    ctx->al_cursor.off))->type) <
+		    le32_to_cpu(AT_ATTRIBUTE_LIST) &&
+		    le32_to_cpu(al_entry->type) > le32_to_cpu(AT_ATTRIBUTE_LIST)) {
 find_attr_list_attr:
 
 			/* Check for bogus calls. */
-			if (name || name_len || val || val_len || lowest_vcn)
-				return -EINVAL;
+			if (name || name_len || val || val_len || lowest_vcn) {
+				err = -EINVAL;
+				goto unlock_list_attr;
+			}
 
 			/* We want the base record. */
 			if (ctx->ntfs_ino != base_ni)
@@ -1240,28 +1340,33 @@ find_attr_list_attr:
 			 * Setup the search context so the correct
 			 * attribute is returned next time round.
 			 */
-			ctx->al_entry = al_entry;
+			ctx->al_cursor.off = (u8 *)al_entry - al_start;
+			ctx->al_cursor.gen = base_ni->attr_list_gen;
+			ctx->al_cursor.valid = true;
 			ctx->is_first = true;
 
-			/* Got it. Done. */
 			if (!err)
-				return 0;
+				goto unlock_list_attr;
 
 			/* Error! If other than not found return it. */
 			if (err != -ENOENT)
-				return err;
+				goto unlock_list_attr;
 
 			/* Not found?!? Absurd! */
 			ntfs_error(ctx->ntfs_ino->vol->sb, "Attribute list wasn't found");
-			return -EIO;
+			err = -EIO;
+			goto unlock_list_attr;
 		}
 	}
 	for (;; al_entry = next_al_entry) {
+scan_ale:
 		/* Out of bounds check. */
 		if ((u8 *)al_entry < base_ni->attr_list ||
 				(u8 *)al_entry > al_end)
 			break;	/* Inode is corrupt. */
-		ctx->al_entry = al_entry;
+		ctx->al_cursor.off = (u8 *)al_entry - al_start;
+		ctx->al_cursor.gen = base_ni->attr_list_gen;
+		ctx->al_cursor.valid = true;
 		/* Catch the end of the attribute list. */
 		if ((u8 *)al_entry == al_end)
 			goto not_found;
@@ -1325,6 +1430,9 @@ find_attr_list_attr:
 			if (rc)
 				continue;
 		}
+		if (type != AT_UNUSED &&
+		    le64_to_cpu(al_entry->lowest_vcn) > (u64)lowest_vcn)
+			goto not_found;
 		/*
 		 * The names match or @name not present and attribute is
 		 * unnamed.  Now check @lowest_vcn.  Continue search if the
@@ -1347,8 +1455,19 @@ find_attr_list_attr:
 			continue;
 
 is_enumeration:
-		if (MREF_LE(al_entry->mft_reference) == ni->mft_no) {
-			if (MSEQNO_LE(al_entry->mft_reference) != ni->seq_no) {
+		/*
+		 * The extent mapping below takes extent_lock.  Keep only a
+		 * stable copy of this ALE while taking it, so the attr-list
+		 * read lock never nests outside extent_lock.
+		 */
+		ntfs_attrlist_capture_exact(ctx, base_ni, al_entry, al_start);
+		if (attr_list_locked)
+			up_read(&base_ni->attr_list_lock);
+		attr_list_locked = false;
+
+		if (MREF_LE(ctx->al_exact.key.mft_reference) == ni->mft_no) {
+			if (MSEQNO_LE(ctx->al_exact.key.mft_reference) !=
+			    ni->seq_no) {
 				ntfs_error(vol->sb,
 					"Found stale mft reference in attribute list of base inode 0x%llx.%s",
 					base_ni->mft_no, es);
@@ -1360,21 +1479,22 @@ is_enumeration:
 			if (ni != base_ni)
 				unmap_extent_mft_record(ni);
 			/* Do we want the base record back? */
-			if (MREF_LE(al_entry->mft_reference) ==
-					base_ni->mft_no) {
+			if (MREF_LE(ctx->al_exact.key.mft_reference) ==
+			    base_ni->mft_no) {
 				ni = ctx->ntfs_ino = base_ni;
 				ctx->mrec = ctx->base_mrec;
 				ctx->mapped_mrec = ctx->mapped_base_mrec;
 			} else {
 				/* We want an extent record. */
-				ctx->mrec = map_extent_mft_record(base_ni,
-						le64_to_cpu(
-						al_entry->mft_reference), &ni);
+				ctx->mrec =
+					map_extent_mft_record(base_ni, le64_to_cpu(
+								ctx->al_exact.key.mft_reference),
+							      &ni);
 				if (IS_ERR(ctx->mrec)) {
 					ntfs_error(vol->sb,
-							"Failed to map extent mft record 0x%lx of base inode 0x%llx.%s",
-							MREF_LE(al_entry->mft_reference),
-							base_ni->mft_no, es);
+						   "Failed to map extent mft record 0x%lx of base inode 0x%llx.%s",
+						   MREF_LE(ctx->al_exact.key.mft_reference),
+						   base_ni->mft_no, es);
 					err = PTR_ERR(ctx->mrec);
 					if (err == -ENOENT)
 						err = -EIO;
@@ -1384,7 +1504,6 @@ is_enumeration:
 				}
 				ctx->ntfs_ino = ni;
 				ctx->mapped_mrec = true;
-
 			}
 		}
 		a = ctx->attr = (struct attr_record *)((u8 *)ctx->mrec +
@@ -1416,8 +1535,19 @@ do_next_attr_loop:
 
 		mft_free_len = le32_to_cpu(ctx->mrec->bytes_in_use) -
 			       ((u8 *)a - (u8 *)ctx->mrec);
-		if (mft_free_len >= sizeof(a->type) && a->type == AT_END)
-			continue;
+		if (mft_free_len >= sizeof(a->type) && a->type == AT_END) {
+			down_read(&base_ni->attr_list_lock);
+			attr_list_locked = true;
+			al_start = base_ni->attr_list;
+			al_end = al_start + base_ni->attr_list_size;
+			al_entry = ntfs_attrlist_find_exact_locked(base_ni,
+								   &ctx->al_exact);
+			if (!al_entry)
+				goto corrupt;
+			al_entry = (struct attr_list_entry *)((u8 *)al_entry +
+							      le16_to_cpu(al_entry->length));
+			goto scan_ale;
+		}
 
 		attr_len = le32_to_cpu(a->length);
 		if (!attr_len ||
@@ -1426,23 +1556,38 @@ do_next_attr_loop:
 		    attr_len > mft_free_len)
 			break;
 
-		if (al_entry->instance != a->instance)
+		if (ctx->al_exact.key.instance != a->instance)
 			goto do_next_attr;
 		/*
 		 * If the type and/or the name are mismatched between the
 		 * attribute list entry and the attribute record, there is
 		 * corruption so we break and return error EIO.
 		 */
-		if (al_entry->type != a->type)
+		if (ctx->al_exact.key.type != a->type)
 			break;
 		if (a->name_length && ((le16_to_cpu(a->name_offset) +
 			       a->name_length * sizeof(__le16)) > attr_len))
 			break;
-		if (!ntfs_are_names_equal((__le16 *)((u8 *)a +
-				le16_to_cpu(a->name_offset)), a->name_length,
-				al_name, al_name_len, CASE_SENSITIVE,
-				vol->upcase, vol->upcase_len))
+		/*
+		 * al_entry's name isn't carried across the attr_list_lock
+		 * drop above; re-take the lock just long enough to re-locate
+		 * the same attr-list entry (same pattern as the AT_END case
+		 * above) and compare @a's on-disk name against it.  The
+		 * corrupt/unlock_list_attr labels below drop the lock again
+		 * via attr_list_locked on the not-found/mismatch paths.
+		 */
+		down_read(&base_ni->attr_list_lock);
+		attr_list_locked = true;
+		al_entry = ntfs_attrlist_find_exact_locked(base_ni, &ctx->al_exact);
+		if (!al_entry)
+			goto corrupt;
+		if (!ntfs_are_names_equal((__le16 *)((u8 *)a + le16_to_cpu(a->name_offset)),
+					  a->name_length, al_entry->name,
+					  al_entry->name_length, CASE_SENSITIVE,
+					  vol->upcase, vol->upcase_len))
 			break;
+		up_read(&base_ni->attr_list_lock);
+		attr_list_locked = false;
 
 		ctx->attr = a;
 
@@ -1472,6 +1617,11 @@ do_next_attr:
 		goto do_next_attr_loop;
 	}
 
+unlock_list_attr:
+	if (attr_list_locked)
+		up_read(&base_ni->attr_list_lock);
+	return err;
+
 corrupt:
 	if (ni != base_ni) {
 		if (ni)
@@ -1483,20 +1633,29 @@ corrupt:
 	}
 
 	if (!err) {
-		u64 mft_no = ctx->al_entry ? MREF_LE(ctx->al_entry->mft_reference) : 0;
-		u32 type = ctx->al_entry ? le32_to_cpu(ctx->al_entry->type) : 0;
+		u64 mft_no = ctx->al_exact.valid ?
+			MREF_LE(ctx->al_exact.key.mft_reference) :
+			0;
+		u32 ale_type = ctx->al_exact.valid ?
+			le32_to_cpu(ctx->al_exact.key.type) :
+			0;
 
 		ntfs_error(vol->sb,
-			"Base inode 0x%llx contains corrupt attribute, mft %#llx, type %#x. %s",
-			(long long)base_ni->mft_no, (long long)mft_no, type,
-			"Unmount and run chkdsk.");
+			   "Base inode 0x%llx contains corrupt attribute, mft %#llx, type %#x. %s",
+			   (long long)base_ni->mft_no, (long long)mft_no,
+			   ale_type, "Unmount and run chkdsk.");
 		err = -EIO;
 	}
 
+	if (attr_list_locked)
+		up_read(&base_ni->attr_list_lock);
 	if (err != -ENOMEM)
 		NVolSetErrors(vol);
 	return err;
 not_found:
+	ntfs_attrlist_capture_insert(ctx, base_ni, al_entry, al_start, al_end);
+	if (attr_list_locked)
+		up_read(&base_ni->attr_list_lock);
 	/*
 	 * If we were looking for AT_END, we reset the search context @ctx and
 	 * use ntfs_attr_find() to seek to the end of the base mft record.
@@ -1626,11 +1785,11 @@ static bool ntfs_attr_init_search_ctx(struct ntfs_attr_search_ctx *ctx,
 	ctx->attr = (struct attr_record *)((u8 *)mrec + le16_to_cpu(mrec->attrs_offset));
 	ctx->is_first = true;
 	ctx->ntfs_ino = ni;
-	ctx->al_entry = NULL;
 	ctx->base_ntfs_ino = NULL;
 	ctx->base_mrec = NULL;
 	ctx->base_attr = NULL;
 	ctx->mapped_base_mrec = false;
+	ntfs_attrlist_reset_locators(ctx);
 	return true;
 }
 
@@ -1654,11 +1813,7 @@ void ntfs_attr_reinit_search_ctx(struct ntfs_attr_search_ctx *ctx)
 		/* Sanity checks are performed elsewhere. */
 		ctx->attr = (struct attr_record *)((u8 *)ctx->mrec +
 				le16_to_cpu(ctx->mrec->attrs_offset));
-		/*
-		 * This needs resetting due to ntfs_external_attr_find() which
-		 * can leave it set despite having zeroed ctx->base_ntfs_ino.
-		 */
-		ctx->al_entry = NULL;
+		ntfs_attrlist_reset_locators(ctx);
 		return;
 	} /* Attribute list. */
 	if (ctx->ntfs_ino != ctx->base_ntfs_ino && ctx->ntfs_ino)
@@ -3568,6 +3723,8 @@ int ntfs_attr_record_move_to(struct ntfs_attr_search_ctx *ctx, struct ntfs_inode
 	int err;
 	struct mft_record *ni_mrec;
 	struct super_block *sb;
+	struct ntfs_inode *base_ni;
+	struct attr_list_entry *ale;
 
 	if (!ctx || !ctx->attr || !ctx->ntfs_ino || !ni) {
 		ntfs_debug("Invalid arguments passed.\n");
@@ -3583,7 +3740,7 @@ int ntfs_attr_record_move_to(struct ntfs_attr_search_ctx *ctx, struct ntfs_inode
 	if (ctx->ntfs_ino == ni)
 		return 0;
 
-	if (!ctx->al_entry) {
+	if (!ctx->al_exact.valid) {
 		ntfs_debug("Inode should contain attribute list to use this function.\n");
 		return -EINVAL;
 	}
@@ -3637,9 +3794,24 @@ int ntfs_attr_record_move_to(struct ntfs_attr_search_ctx *ctx, struct ntfs_inode
 	mark_mft_record_dirty(ni);
 
 	/* Update attribute list. */
-	ctx->al_entry->mft_reference =
+	a = (struct attr_record *)nctx->attr;
+	base_ni = ntfs_attr_ctx_base_ni(ctx);
+
+	down_write(&base_ni->attr_list_lock);
+	ale = ntfs_attrlist_find_exact_locked(base_ni, &ctx->al_exact);
+	if (!ale) {
+		up_write(&base_ni->attr_list_lock);
+		unmap_mft_record(ni);
+		err = -EIO;
+		goto put_err_out;
+	}
+
+	ale->mft_reference =
 		MK_LE_MREF(ni->mft_no, le16_to_cpu(ni_mrec->sequence_number));
-	ctx->al_entry->instance = nctx->attr->instance;
+	ale->instance = nctx->attr->instance;
+	base_ni->attr_list_gen++;
+	ntfs_attrlist_capture_exact(ctx, base_ni, ale, base_ni->attr_list);
+	up_write(&base_ni->attr_list_lock);
 	unmap_mft_record(ni);
 put_err_out:
 	ntfs_attr_put_search_ctx(nctx);
@@ -3879,6 +4051,23 @@ out:
  * call to this function. Vice-versa @na->compressed_size will be calculated and
  * set to correct value during this function.
  */
+static bool ntfs_attr_ctx_matches_ni(const struct ntfs_attr_search_ctx *ctx,
+				     const struct ntfs_inode *ni)
+{
+	const struct attr_record *a = ctx->attr;
+	const __le16 *name;
+
+	if (a->type != ni->type || a->name_length != ni->name_len)
+		return false;
+	if (!a->name_length)
+		return true;
+
+	name = (const __le16 *)((const u8 *)a + le16_to_cpu(a->name_offset));
+	return ntfs_are_names_equal(name, a->name_length, ni->name,
+				    ni->name_len, CASE_SENSITIVE,
+				    ni->vol->upcase, ni->vol->upcase_len);
+}
+
 int ntfs_attr_update_mapping_pairs(struct ntfs_inode *ni, s64 from_vcn)
 {
 	struct ntfs_attr_search_ctx *ctx;
@@ -3887,11 +4076,12 @@ int ntfs_attr_update_mapping_pairs(struct ntfs_inode *ni, s64 from_vcn)
 	struct attr_record *a;
 	s64 stop_vcn;
 	int err = 0, mp_size, cur_max_mp_size, exp_max_mp_size;
-	bool finished_build;
+	bool finished_build, attrlist_changed = false;
 	bool first_updated = false;
 	struct super_block *sb;
 	struct runlist_element *start_rl;
 	unsigned int de_cluster_count = 0;
+	bool first_lookup = true;
 
 retry:
 	if (!ni || !ni->runlist.rl)
@@ -3920,10 +4110,23 @@ retry:
 	/* Fill attribute records with new mapping pairs. */
 	stop_vcn = 0;
 	finished_build = false;
+	first_lookup = true;
 	start_rl = ni->runlist.rl;
-	while (!(err = ntfs_attr_lookup(ni->type, ni->name, ni->name_len,
-				CASE_SENSITIVE, from_vcn, NULL, 0, ctx))) {
+	while (1) {
 		unsigned int de_cnt = 0;
+
+		err = ntfs_attr_lookup(AT_UNUSED, NULL, 0, CASE_SENSITIVE, 0,
+				       NULL, 0, ctx);
+		if (err)
+			break;
+		if (!ntfs_attr_ctx_matches_ni(ctx, ni))
+			continue;
+		if (first_lookup) {
+			if (le64_to_cpu(ctx->attr->data.non_resident.lowest_vcn) <
+					from_vcn)
+				continue;
+			first_lookup = false;
+		}
 
 		a = ctx->attr;
 		m = ctx->mrec;
@@ -4050,15 +4253,40 @@ retry:
 			}
 		}
 
-		/* Update lowest vcn. */
-		a->data.non_resident.lowest_vcn = cpu_to_le64(stop_vcn);
-		mark_mft_record_dirty(ctx->ntfs_ino);
-		if ((ctx->ntfs_ino->nr_extents == -1 || NInoAttrList(ctx->ntfs_ino)) &&
+		/*
+		 * al_cursor.valid is true here exactly when this iteration's
+		 * ntfs_attr_lookup() went through ntfs_external_attr_find()
+		 */
+		if (ctx->al_cursor.valid &&
 		    ctx->attr->type != AT_ATTRIBUTE_LIST) {
-			ctx->al_entry->lowest_vcn = cpu_to_le64(stop_vcn);
-			err = ntfs_attrlist_update(base_ni);
-			if (err)
+			struct attr_list_entry *ale;
+
+			down_write(&base_ni->attr_list_lock);
+			ale = ntfs_attrlist_find_exact_locked(base_ni,
+							      &ctx->al_exact);
+			if (!ale) {
+				up_write(&base_ni->attr_list_lock);
+				err = -EIO;
 				goto put_err_out;
+			}
+			ale->lowest_vcn = cpu_to_le64(stop_vcn);
+			base_ni->attr_list_gen++;
+			ntfs_attrlist_capture_exact(ctx, base_ni, ale,
+						    base_ni->attr_list);
+			ctx->al_cursor.off = (u8 *)ale - base_ni->attr_list;
+			ctx->al_cursor.gen = base_ni->attr_list_gen;
+			ctx->al_cursor.valid = true;
+			attrlist_changed = true;
+			up_write(&base_ni->attr_list_lock);
+
+			/* Update lowest vcn in attr record after ALE is fixed. */
+			a->data.non_resident.lowest_vcn = cpu_to_le64(stop_vcn);
+			mark_mft_record_dirty(ctx->ntfs_ino);
+
+		} else {
+			/* Update lowest vcn. */
+			a->data.non_resident.lowest_vcn = cpu_to_le64(stop_vcn);
+			mark_mft_record_dirty(ctx->ntfs_ino);
 		}
 
 		/*
@@ -4109,12 +4337,21 @@ retry:
 		}
 	}
 
+	if (attrlist_changed) {
+		err = ntfs_attrlist_update(base_ni);
+		if (err)
+			goto put_err_out;
+	}
+
 	/* Deallocate not used attribute extents and return with success. */
 	if (finished_build) {
 		ntfs_attr_reinit_search_ctx(ctx);
 		ntfs_debug("Deallocate marked extents.\n");
-		while (!(err = ntfs_attr_lookup(ni->type, ni->name, ni->name_len,
-				CASE_SENSITIVE, 0, NULL, 0, ctx))) {
+		while (!(err = ntfs_attr_lookup(AT_UNUSED, NULL, 0,
+						CASE_SENSITIVE, 0, NULL, 0,
+						ctx))) {
+			if (!ntfs_attr_ctx_matches_ni(ctx, ni))
+				continue;
 			if (le64_to_cpu(ctx->attr->data.non_resident.highest_vcn) !=
 					NTFS_VCN_DELETE_MARK)
 				continue;
