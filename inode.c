@@ -516,6 +516,7 @@ void __ntfs_init_inode(struct super_block *sb, struct ntfs_inode *ni)
 #endif
 	ni->mrec = NULL;
 	init_rwsem(&ni->attr_list_lock);
+	mutex_init(&ni->attr_list_persist_lock);
 	ni->attr_list_gen = 0;
 	ni->attr_list_size = 0;
 	ni->attr_list = NULL;
