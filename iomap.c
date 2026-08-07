@@ -207,7 +207,7 @@ static const struct iomap_page_ops ntfs_zero_iomap_page_ops = {
 #endif
 
 static int ntfs_read_iomap_begin_resident(struct inode *inode, loff_t offset, loff_t length,
-		unsigned int flags, struct iomap *iomap)
+		unsigned int flags, struct iomap *iomap, bool keep_mrec_lock)
 {
 	struct ntfs_inode *base_ni, *ni = NTFS_I(inode);
 	struct ntfs_attr_search_ctx *ctx;
@@ -223,6 +223,8 @@ static int ntfs_read_iomap_begin_resident(struct inode *inode, loff_t offset, lo
 		base_ni = ni->ext.base_ntfs_ino;
 	else
 		base_ni = ni;
+
+	mutex_lock(&base_ni->mrec_lock);
 
 	ctx = ntfs_attr_get_search_ctx(base_ni, NULL);
 	if (!ctx) {
@@ -278,6 +280,13 @@ static int ntfs_read_iomap_begin_resident(struct inode *inode, loff_t offset, lo
 out:
 	if (ctx)
 		ntfs_attr_put_search_ctx(ctx);
+
+	if (!err && keep_mrec_lock && iomap->type == IOMAP_INLINE) {
+		iomap->private = base_ni;
+		return 0;
+	}
+
+	mutex_unlock(&base_ni->mrec_lock);
 
 	return err;
 }
@@ -427,11 +436,11 @@ static int ntfs_read_iomap_begin_non_resident(struct inode *inode, loff_t offset
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
 static int __ntfs_read_iomap_begin(struct inode *inode, loff_t offset, loff_t length,
 		unsigned int flags, struct iomap *iomap, struct iomap *srcmap,
-		bool need_unwritten)
+		bool need_unwritten, bool keep_mrec_lock)
 #else
 static int __ntfs_read_iomap_begin(struct inode *inode, loff_t offset, loff_t length,
 		unsigned int flags, struct iomap *iomap, struct iomap *srcmap,
-		bool for_clu_zero, bool need_unwritten)
+		bool for_clu_zero, bool need_unwritten, bool keep_mrec_lock)
 #endif
 {
 	if (NInoNonResident(NTFS_I(inode)))
@@ -445,7 +454,7 @@ static int __ntfs_read_iomap_begin(struct inode *inode, loff_t offset, loff_t le
 #endif
 	else
 		return ntfs_read_iomap_begin_resident(inode, offset, length,
-						      flags, iomap);
+						      flags, iomap, keep_mrec_lock);
 }
 
 #if LINUX_VERSION_CODE <= KERNEL_VERSION(7, 1, 0)
@@ -458,6 +467,16 @@ static int ntfs_read_iomap_end(struct inode *inode, loff_t pos, loff_t length,
 		put_page(ipage);
 	}
 
+	return written;
+}
+#else
+static int ntfs_read_iomap_end(struct inode *inode, loff_t pos, loff_t length,
+		ssize_t written, unsigned int flags, struct iomap *iomap)
+{
+	struct ntfs_inode *base_ni = iomap->private;
+
+	if (base_ni)
+		mutex_unlock(&base_ni->mrec_lock);
 	return written;
 }
 #endif
@@ -475,14 +494,14 @@ static int ntfs_read_iomap_begin(struct inode *inode, loff_t offset, loff_t leng
 		unsigned int flags, struct iomap *iomap, struct iomap *srcmap)
 {
 	return __ntfs_read_iomap_begin(inode, offset, length, flags, iomap,
-			srcmap, true);
+			srcmap, true, true);
 }
 
 static int ntfs_seek_iomap_begin(struct inode *inode, loff_t offset, loff_t length,
 		unsigned int flags, struct iomap *iomap, struct iomap *srcmap)
 {
 	return __ntfs_read_iomap_begin(inode, offset, length, flags, iomap,
-			srcmap, false);
+			srcmap, false, false);
 }
 
 
@@ -496,21 +515,21 @@ static int ntfs_zero_read_iomap_begin(struct inode *inode, loff_t offset, loff_t
 		unsigned int flags, struct iomap *iomap, struct iomap *srcmap)
 {
 	return __ntfs_read_iomap_begin(inode, offset, length, flags, iomap, srcmap,
-				       true, false);
+				       true, false, false);
 }
 
 static int ntfs_read_iomap_begin(struct inode *inode, loff_t offset, loff_t length,
 		unsigned int flags, struct iomap *iomap, struct iomap *srcmap)
 {
 	return __ntfs_read_iomap_begin(inode, offset, length, flags, iomap, srcmap,
-				       false, true);
+				       false, true, true);
 }
 
 static int ntfs_seek_iomap_begin(struct inode *inode, loff_t offset, loff_t length,
 		unsigned int flags, struct iomap *iomap, struct iomap *srcmap)
 {
 	return __ntfs_read_iomap_begin(inode, offset, length, flags, iomap, srcmap,
-				       false, false);
+				       false, false, false);
 }
 
 static const struct iomap_ops ntfs_zero_read_iomap_ops = {
@@ -522,9 +541,7 @@ static const struct iomap_ops ntfs_zero_read_iomap_ops = {
 
 const struct iomap_ops ntfs_read_iomap_ops = {
 	.iomap_begin = ntfs_read_iomap_begin,
-#if LINUX_VERSION_CODE <= KERNEL_VERSION(7, 1, 0)
 	.iomap_end = ntfs_read_iomap_end,
-#endif
 };
 
 const struct iomap_ops ntfs_seek_iomap_ops = {
