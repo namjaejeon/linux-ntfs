@@ -215,7 +215,9 @@ static int ntfs_read_iomap_begin_resident(struct inode *inode, loff_t offset, lo
 	u32 attr_len;
 	int err = 0;
 	char *kattr;
+#if LINUX_VERSION_CODE <= KERNEL_VERSION(7, 1, 0)
 	struct page *ipage;
+#endif
 
 	if (NInoAttr(ni))
 		base_ni = ni->ext.base_ntfs_ino;
@@ -256,6 +258,7 @@ static int ntfs_read_iomap_begin_resident(struct inode *inode, loff_t offset, lo
 
 	kattr = (u8 *)ctx->attr + le16_to_cpu(ctx->attr->data.resident.value_offset);
 
+#if LINUX_VERSION_CODE <= KERNEL_VERSION(7, 1, 0)
 	ipage = alloc_page(GFP_NOFS | __GFP_ZERO);
 	if (!ipage) {
 		err = -ENOMEM;
@@ -263,11 +266,14 @@ static int ntfs_read_iomap_begin_resident(struct inode *inode, loff_t offset, lo
 	}
 
 	memcpy(page_address(ipage), kattr, attr_len);
-	iomap->type = IOMAP_INLINE;
 	iomap->inline_data = page_address(ipage);
+	iomap->private = ipage;
+#else
+	iomap->inline_data = kattr;
+#endif
+	iomap->type = IOMAP_INLINE;
 	iomap->offset = 0;
 	iomap->length = attr_len;
-	iomap->private = ipage;
 
 out:
 	if (ctx)
@@ -442,6 +448,7 @@ static int __ntfs_read_iomap_begin(struct inode *inode, loff_t offset, loff_t le
 						      flags, iomap);
 }
 
+#if LINUX_VERSION_CODE <= KERNEL_VERSION(7, 1, 0)
 static int ntfs_read_iomap_end(struct inode *inode, loff_t pos, loff_t length,
 		ssize_t written, unsigned int flags, struct iomap *iomap)
 {
@@ -453,6 +460,7 @@ static int ntfs_read_iomap_end(struct inode *inode, loff_t pos, loff_t length,
 
 	return written;
 }
+#endif
 
 static int ntfs_zero_read_iomap_end(struct inode *inode, loff_t pos, loff_t length,
 		ssize_t written, unsigned int flags, struct iomap *iomap)
@@ -514,12 +522,16 @@ static const struct iomap_ops ntfs_zero_read_iomap_ops = {
 
 const struct iomap_ops ntfs_read_iomap_ops = {
 	.iomap_begin = ntfs_read_iomap_begin,
+#if LINUX_VERSION_CODE <= KERNEL_VERSION(7, 1, 0)
 	.iomap_end = ntfs_read_iomap_end,
+#endif
 };
 
 const struct iomap_ops ntfs_seek_iomap_ops = {
 	.iomap_begin = ntfs_seek_iomap_begin,
+#if LINUX_VERSION_CODE <= KERNEL_VERSION(7, 1, 0)
 	.iomap_end = ntfs_read_iomap_end,
+#endif
 };
 
 int ntfs_dio_zero_range(struct inode *inode, loff_t offset, loff_t length)
@@ -843,7 +855,9 @@ static int ntfs_write_iomap_begin_resident(struct inode *inode, loff_t offset,
 	u32 attr_len;
 	int err = 0;
 	char *kattr;
+#if LINUX_VERSION_CODE <= KERNEL_VERSION(7, 1, 0)
 	struct page *ipage;
+#endif
 
 	ctx = ntfs_attr_get_search_ctx(ni, NULL);
 	if (!ctx) {
@@ -864,6 +878,7 @@ static int ntfs_write_iomap_begin_resident(struct inode *inode, loff_t offset,
 	attr_len = le32_to_cpu(a->data.resident.value_length);
 	kattr = (u8 *)a + le16_to_cpu(a->data.resident.value_offset);
 
+#if LINUX_VERSION_CODE <= KERNEL_VERSION(7, 1, 0)
 	ipage = alloc_page(GFP_NOFS | __GFP_ZERO);
 	if (!ipage) {
 		err = -ENOMEM;
@@ -871,17 +886,27 @@ static int ntfs_write_iomap_begin_resident(struct inode *inode, loff_t offset,
 	}
 
 	memcpy(page_address(ipage), kattr, attr_len);
-	iomap->type = IOMAP_INLINE;
 	iomap->inline_data = page_address(ipage);
+	iomap->private = ipage;
+#else
+	iomap->inline_data = kattr;
+#endif
+	iomap->type = IOMAP_INLINE;
 	iomap->offset = 0;
 	/* iomap requires there is only one INLINE_DATA extent */
 	iomap->length = attr_len;
-	iomap->private = ipage;
 
 out:
 	if (ctx)
 		ntfs_attr_put_search_ctx(ctx);
+
+#if LINUX_VERSION_CODE <= KERNEL_VERSION(7, 1, 0)
 	mutex_unlock(&ni->mrec_lock);
+#else
+	if (err)
+		mutex_unlock(&ni->mrec_lock);
+#endif
+
 	return err;
 }
 
@@ -930,6 +955,7 @@ static int ntfs_write_iomap_end_resident(struct inode *inode, loff_t pos,
 					 unsigned int flags, struct iomap *iomap)
 {
 	struct ntfs_inode *ni = NTFS_I(inode);
+#if LINUX_VERSION_CODE <= KERNEL_VERSION(7, 1, 0)
 	struct ntfs_attr_search_ctx *ctx;
 	u32 attr_len;
 	int err;
@@ -964,6 +990,9 @@ err_out:
 	if (ctx)
 		ntfs_attr_put_search_ctx(ctx);
 	put_page(ipage);
+#else
+	mark_mft_record_dirty(ni);
+#endif
 	mutex_unlock(&ni->mrec_lock);
 	return written;
 
