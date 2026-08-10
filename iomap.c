@@ -282,7 +282,9 @@ out:
 		ntfs_attr_put_search_ctx(ctx);
 
 	if (!err && keep_mrec_lock && iomap->type == IOMAP_INLINE) {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 2, 0)
 		iomap->private = base_ni;
+#endif
 		return 0;
 	}
 
@@ -462,6 +464,26 @@ static int ntfs_read_iomap_end(struct inode *inode, loff_t pos, loff_t length,
 		ssize_t written, unsigned int flags, struct iomap *iomap)
 {
 	if (iomap->type == IOMAP_INLINE) {
+		struct ntfs_inode *ni = NTFS_I(inode);
+		struct ntfs_inode *base_ni;
+		struct page *ipage = iomap->private;
+
+		if (NInoAttr(ni))
+			base_ni = ni->ext.base_ntfs_ino;
+		else
+			base_ni = ni;
+
+		put_page(ipage);
+		mutex_unlock(&base_ni->mrec_lock);
+	}
+
+	return written;
+}
+
+static int ntfs_seek_iomap_end(struct inode *inode, loff_t pos, loff_t length,
+		ssize_t written, unsigned int flags, struct iomap *iomap)
+{
+	if (iomap->type == IOMAP_INLINE) {
 		struct page *ipage = iomap->private;
 
 		put_page(ipage);
@@ -547,7 +569,7 @@ const struct iomap_ops ntfs_read_iomap_ops = {
 const struct iomap_ops ntfs_seek_iomap_ops = {
 	.iomap_begin = ntfs_seek_iomap_begin,
 #if LINUX_VERSION_CODE <= KERNEL_VERSION(7, 1, 0)
-	.iomap_end = ntfs_read_iomap_end,
+	.iomap_end = ntfs_seek_iomap_end,
 #endif
 };
 
