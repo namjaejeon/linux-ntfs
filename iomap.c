@@ -506,6 +506,11 @@ static int ntfs_read_iomap_end(struct inode *inode, loff_t pos, loff_t length,
 static int ntfs_zero_read_iomap_end(struct inode *inode, loff_t pos, loff_t length,
 		ssize_t written, unsigned int flags, struct iomap *iomap)
 {
+#if LINUX_VERSION_CODE <= KERNEL_VERSION(7, 1, 0)
+	if (iomap->type == IOMAP_INLINE)
+		put_page(iomap->private);
+#endif
+
 	if ((flags & IOMAP_ZERO) && (iomap->flags & IOMAP_F_STALE))
 		return -EPERM;
 	return written;
