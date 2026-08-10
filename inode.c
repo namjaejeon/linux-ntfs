@@ -3518,6 +3518,9 @@ int ntfs_inode_free_space(struct ntfs_inode *ni, int size)
 	 * Chkdsk complain if $STANDARD_INFORMATION is not in the base MFT
 	 * record.
 	 *
+	 * $INDEX_ROOT must remain resident, but its attribute record may be moved
+	 * to an extent MFT record when the base record needs room for the list.
+	 *
 	 * Also we can't move $ATTRIBUTE_LIST from base MFT_RECORD, so position
 	 * search context on first attribute after $STANDARD_INFORMATION and
 	 * $ATTRIBUTE_LIST.
@@ -3557,9 +3560,6 @@ retry:
 
 		if (ntfs_inode_base(ctx->ntfs_ino)->mft_no == FILE_MFT &&
 				ctx->attr->type == AT_DATA)
-			goto retry;
-
-		if (ctx->attr->type == AT_INDEX_ROOT)
 			goto retry;
 
 		record_size = le32_to_cpu(ctx->attr->length);
