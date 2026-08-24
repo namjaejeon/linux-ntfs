@@ -84,10 +84,12 @@ int ntfs_dev_read(struct super_block *sb, void *buf, loff_t start, size_t size)
 	idx_end = end >> PAGE_SHIFT;
 	from = start & ~PAGE_MASK;
 
-	if (idx == idx_end)
+	if (idx == idx_end || (end & ~PAGE_MASK))
 		idx_end++;
 
 	for (; idx < idx_end; idx++, from = 0) {
+		u32 len;
+
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 11, 0)
 		folio = read_mapping_folio(sb->s_bdev->bd_mapping, idx, NULL);
 #else
@@ -100,9 +102,10 @@ int ntfs_dev_read(struct super_block *sb, void *buf, loff_t start, size_t size)
 
 		offset = (loff_t)idx << PAGE_SHIFT;
 		to = min_t(u32, end - offset, PAGE_SIZE);
+		len = to - from;
 
-		memcpy_from_folio(buf + buf_off, folio, from, to);
-		buf_off += to;
+		memcpy_from_folio(buf + buf_off, folio, from, len);
+		buf_off += len;
 		folio_put(folio);
 	}
 
@@ -122,10 +125,12 @@ int ntfs_dev_read(struct super_block *sb, void *buf, loff_t start, size_t size)
 	idx_end = end >> PAGE_SHIFT;
 	from = start & ~PAGE_MASK;
 
-	if (idx == idx_end)
+	if (idx == idx_end || (end & ~PAGE_MASK))
 		idx_end++;
 
 	for (; idx < idx_end; idx++, from = 0) {
+		u32 len;
+
 		page = read_mapping_page(sb->s_bdev->bd_inode->i_mapping, idx, NULL);
 		if (IS_ERR(page)) {
 			ntfs_error(sb, "Unable to read %ld page", idx);
@@ -135,9 +140,10 @@ int ntfs_dev_read(struct super_block *sb, void *buf, loff_t start, size_t size)
 		kaddr = kmap_atomic(page);
 		offset = (loff_t)idx << PAGE_SHIFT;
 		to = min_t(u32, end - offset, PAGE_SIZE);
+		len = to - from;
 
-		memcpy(buf + buf_off, kaddr + from, to);
-		buf_off += to;
+		memcpy(buf + buf_off, kaddr + from, len);
+		buf_off += len;
 		kunmap_atomic(kaddr);
 		put_page(page);
 	}
@@ -170,7 +176,7 @@ int ntfs_bdev_write(struct super_block *sb, void *buf, loff_t start, size_t size
 	idx_end = end >> PAGE_SHIFT;
 	from = start & ~PAGE_MASK;
 
-	if (idx == idx_end)
+	if (idx == idx_end || (end & ~PAGE_MASK))
 		idx_end++;
 
 	for (; idx < idx_end; idx++, from = 0) {
@@ -212,10 +218,12 @@ int ntfs_bdev_write(struct super_block *sb, void *buf, loff_t start, size_t size
 	idx_end = end >> PAGE_SHIFT;
 	from = start & ~PAGE_MASK;
 
-	if (idx == idx_end)
+	if (idx == idx_end || (end & ~PAGE_MASK))
 		idx_end++;
 
 	for (; idx < idx_end; idx++, from = 0) {
+		u32 len;
+
 		page = read_mapping_page(sb->s_bdev->bd_inode->i_mapping, idx, NULL);
 		if (IS_ERR(page)) {
 			ntfs_error(sb, "Unable to read %ld page", idx);
@@ -225,9 +233,10 @@ int ntfs_bdev_write(struct super_block *sb, void *buf, loff_t start, size_t size
 		kaddr = kmap_atomic(page);
 		offset = (loff_t)idx << PAGE_SHIFT;
 		to = min_t(u32, end - offset, PAGE_SIZE);
+		len = to - from;
 
-		memcpy(kaddr + from, buf + buf_off, to);
-		buf_off += to;
+		memcpy(kaddr + from, buf + buf_off, len);
+		buf_off += len;
 		kunmap_atomic(kaddr);
 		SetPageUptodate(page);
 		set_page_dirty(page);
