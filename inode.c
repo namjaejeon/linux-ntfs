@@ -181,10 +181,11 @@ struct inode *ntfs_iget(struct super_block *sb, u64 mft_no)
 		unlock_new_inode(vi);
 	}
 	/*
-	 * There is no point in keeping bad inodes around if the failure was
-	 * due to ENOMEM. We want to be able to retry again later.
+	 * There is no point in keeping bad inodes around. This also
+	 * simplifies things in that we never need to check for bad inodes
+	 * elsewhere.
 	 */
-	if (unlikely(err == -ENOMEM)) {
+	if (unlikely(err)) {
 		iput(vi);
 		vi = ERR_PTR(err);
 	}
@@ -921,7 +922,9 @@ skip_attr_list_load:
 	if (ni->flags & FILE_ATTR_REPARSE_POINT) {
 		unsigned int mode;
 
-		mode = ntfs_make_symlink(ni);
+		err = ntfs_parse_reparse(ni, &mode);
+		if (err)
+			goto unm_err_out;
 		if (mode)
 			vi->i_mode |= mode;
 		else {
@@ -1141,6 +1144,11 @@ view_index_meta:
 		/* Setup the state. */
 		if (a->flags & (ATTR_COMPRESSION_MASK | ATTR_IS_SPARSE)) {
 			if (a->flags & ATTR_COMPRESSION_MASK) {
+				if (NInoWofCompressed(ni)) {
+					ntfs_error(vi->i_sb,
+						"Found native compression on a WOF file.");
+					goto unm_err_out;
+				}
 				NInoSetCompressed(ni);
 				ni->flags |= FILE_ATTR_COMPRESSED;
 				if (vol->cluster_size > 4096) {
@@ -1171,7 +1179,7 @@ view_index_meta:
 		}
 		if (a->non_resident) {
 			NInoSetNonResident(ni);
-			if (NInoCompressed(ni) || NInoSparse(ni)) {
+			if (NInoCompressed(ni) || (NInoSparse(ni) && !NInoWofCompressed(ni))) {
 				if (NInoCompressed(ni) &&
 				    a->data.non_resident.compression_unit != 4) {
 					ntfs_error(vi->i_sb,
@@ -1257,7 +1265,8 @@ no_data_attr_special_case:
 	 * sizes of all non-resident attributes present to give us the Linux
 	 * correct size that should go into i_blocks (after division by 512).
 	 */
-	if (S_ISREG(vi->i_mode) && (NInoCompressed(ni) || NInoSparse(ni)))
+	if (S_ISREG(vi->i_mode) &&
+	    (NInoCompressed(ni) || (NInoSparse(ni) && !NInoWofCompressed(ni))))
 		vi->i_blocks = ni->itype.compressed.size >> 9;
 	else
 		vi->i_blocks = ni->allocated_size >> 9;
@@ -1452,7 +1461,7 @@ static int ntfs_read_locked_attr_inode(struct inode *base_vi, struct inode *vi)
 				"Attribute name is placed after the mapping pairs array.");
 			goto unm_err_out;
 		}
-		if (NInoCompressed(ni) || NInoSparse(ni)) {
+		if (NInoCompressed(ni) || (NInoSparse(ni) && !NInoWofCompressed(ni))) {
 			if (NInoCompressed(ni) && a->data.non_resident.compression_unit != 4) {
 				ntfs_error(vi->i_sb,
 					"Found non-standard compression unit (%u instead of 4).  Cannot handle this.",

@@ -209,6 +209,10 @@ int ntfs_read_compressed_block(struct folio *folio);
 #else
 int ntfs_read_compressed_block(struct page *page);
 #endif
+#ifdef CONFIG_NTFS_FS_WOF_COMPRESSION
+int ntfs_read_wof_compressed_block(struct folio *folio);
+void ntfs_wof_free_workspaces(void);
+#endif
 int allocate_compression_buffers(void);
 void free_compression_buffers(void);
 int ntfs_compress_write(struct ntfs_inode *ni, loff_t pos, size_t count,
