@@ -1923,7 +1923,7 @@ int ntfs_read_inode_mount(struct inode *vi)
 	struct mft_record *m = NULL;
 	struct attr_record *a;
 	struct ntfs_attr_search_ctx *ctx;
-	unsigned int i, nr_blocks;
+	unsigned int i;
 	int err;
 	size_t new_rl_count;
 
@@ -1966,11 +1966,6 @@ int ntfs_read_inode_mount(struct inode *vi)
 		ntfs_error(sb, "Failed to allocate buffer for $MFT record 0.");
 		goto err_out;
 	}
-
-	/* Determine the first block of the $MFT/$DATA attribute. */
-	nr_blocks = ntfs_bytes_to_sector(vol, vol->mft_record_size);
-	if (!nr_blocks)
-		nr_blocks = 1;
 
 	/* Load $MFT/$DATA's first mft record. */
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 16, 0)
@@ -3993,8 +3988,7 @@ static s64 __ntfs_inode_non_resident_attr_pwrite(struct inode *vi,
 				bio->bi_opf = REQ_OP_WRITE;
 #endif
 				bio->bi_iter.bi_sector =
-					ntfs_bytes_to_sector(vol,
-							ntfs_cluster_to_bytes(vol, lcn) +
+					ntfs_bytes_to_bio_sector(ntfs_cluster_to_bytes(vol, lcn) +
 							lcn_folio_off);
 
 				length = min_t(unsigned long,
