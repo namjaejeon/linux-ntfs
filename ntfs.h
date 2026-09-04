@@ -22,6 +22,7 @@
 #include <linux/nls.h>
 #include <linux/smp.h>
 #include <linux/pagemap.h>
+#include <linux/blk_types.h>
 #include <linux/uidgid.h>
 
 #include "volume.h"
@@ -73,8 +74,6 @@
 				    PAGE_SHIFT)
 #define NTFS_CLU_TO_POFS(vol, clu) (((u64)(clu) << (vol)->cluster_size_bits) & \
 				    ~PAGE_MASK)
-
-#define NTFS_B_TO_SECTOR(vol, b) ((b) >> ((vol)->sb)->s_blocksize_bits)
 
 enum {
 	NTFS_BLOCK_SIZE		= 512,
@@ -157,11 +156,10 @@ static inline u64 ntfs_cluster_to_poff(const struct ntfs_volume *vol,
 	return (clu << vol->cluster_size_bits) & ~PAGE_MASK;
 }
 
-/* Convert byte offset to sector (block) number. */
-static inline sector_t ntfs_bytes_to_sector(const struct ntfs_volume *vol,
-		u64 bytes)
+/* Convert a byte offset on the volume to a bio sector number. */
+static inline sector_t ntfs_bytes_to_bio_sector(u64 bytes)
 {
-	return bytes >> vol->sb->s_blocksize_bits;
+	return bytes >> SECTOR_SHIFT;
 }
 
 /* Global variables. */
