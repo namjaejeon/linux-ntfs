@@ -327,11 +327,12 @@ static int ntfs_setattr_size(struct inode *vi, struct iattr *attr)
 				&ntfs_read_iomap_ops);
 #endif
 #endif
-		if (err)
+		if (err) {
+			filemap_invalidate_unlock(vi->i_mapping);
 			return err;
+		}
 	}
 #endif
-
 	if (attr->ia_size > old_size) {
 		truncate_pagecache(vi, old_size);
 		i_size_write(vi, attr->ia_size);
