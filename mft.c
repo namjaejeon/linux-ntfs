@@ -10,6 +10,7 @@
 
 #include <linux/writeback.h>
 #include <linux/bio.h>
+#include <linux/completion.h>
 #include <linux/iomap.h>
 
 #include "bitmap.h"
@@ -754,6 +755,146 @@ static int ntfs_sync_mft_mirror_record(struct ntfs_volume *vol,
 }
 #endif
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
+struct ntfs_mft_write_ctx {
+	struct folio *folio;
+	struct address_space *mapping;
+	struct ntfs_volume *vol;
+	struct completion *done;
+	int error;
+	bool writeback_started;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 13, 0)
+	struct writeback_control wbc;
+#endif
+	struct bio bio;
+};
+#endif
+
+static struct bio_set ntfs_mft_bioset;
+
+int ntfs_mft_bioset_init(void)
+{
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
+	return bioset_init(&ntfs_mft_bioset, BIO_POOL_SIZE,
+			offsetof(struct ntfs_mft_write_ctx, bio),
+			BIOSET_NEED_BVECS);
+#else
+	return bioset_init(&ntfs_mft_bioset, BIO_POOL_SIZE, 0,
+			BIOSET_NEED_BVECS);
+#endif
+}
+
+void ntfs_mft_bioset_exit(void)
+{
+	bioset_exit(&ntfs_mft_bioset);
+}
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
+static void ntfs_mft_end_io(struct bio *bio)
+{
+	struct ntfs_mft_write_ctx *ctx =
+		container_of(bio, struct ntfs_mft_write_ctx, bio);
+	struct folio *folio = ctx->folio;
+	struct completion *done = ctx->done;
+	int err;
+
+	if (bio->bi_status)
+		err = blk_status_to_errno(bio->bi_status);
+	else
+		err = ctx->error;
+	if (err) {
+		mapping_set_error(ctx->mapping, err);
+		NVolSetErrors(ctx->vol);
+		ntfs_error(ctx->vol->sb, "I/O error while writing MFT: %d", err);
+	}
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 13, 0)
+	wbc_detach_inode(&ctx->wbc);
+#endif
+	if (!done)
+		bio_put(bio);
+	folio_end_writeback(folio);
+	folio_put(folio);
+	if (done)
+		complete(done);
+}
+
+static void ntfs_start_mft_writeback(struct ntfs_mft_write_ctx *ctx)
+{
+	if (ctx->writeback_started)
+		return;
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 13, 0)
+	wbc_attach_fdatawrite_inode(&ctx->wbc, ctx->mapping->host);
+#endif
+	folio_get(ctx->folio);
+	folio_start_writeback(ctx->folio);
+	ctx->writeback_started = true;
+}
+
+static struct bio *ntfs_alloc_mft_parent_bio(struct ntfs_volume *vol,
+					     struct folio *folio,
+					     struct completion *done)
+{
+	struct ntfs_mft_write_ctx *ctx;
+	struct bio *parent;
+
+	parent = bio_alloc_bioset(vol->sb->s_bdev, 1, REQ_OP_WRITE, GFP_NOIO,
+				  &ntfs_mft_bioset);
+	if (!parent)
+		return NULL;
+
+	ctx = container_of(parent, struct ntfs_mft_write_ctx, bio);
+	ctx->folio = folio;
+	ctx->mapping = folio->mapping;
+	ctx->vol = vol;
+	ctx->done = done;
+	ctx->error = 0;
+	ctx->writeback_started = false;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 13, 0)
+	ctx->wbc = (struct writeback_control){ };
+#endif
+	parent->bi_end_io = ntfs_mft_end_io;
+	return parent;
+}
+
+static int ntfs_prepare_mft_record_io_units(struct ntfs_inode *ni,
+					    struct ntfs_mft_io_unit units[2])
+{
+	struct ntfs_volume *vol = ni->vol;
+	u64 record_byte = (u64)ni->mft_no * vol->mft_record_size;
+	u64 disk_byte;
+	unsigned int nr_units = ni->mft_lcn_count;
+	unsigned int cluster_ofs;
+	unsigned int i;
+
+	if (!nr_units || nr_units > ARRAY_SIZE(ni->mft_lcn))
+		return -EIO;
+	for (i = 0; i < nr_units; i++)
+		if (ni->mft_lcn[i] < 0)
+			return -EIO;
+
+	cluster_ofs = ntfs_bytes_to_cluster_off(vol, record_byte);
+	disk_byte = NTFS_CLU_TO_B(vol, ni->mft_lcn[0]) + cluster_ofs;
+	units[0] = (struct ntfs_mft_io_unit){
+		.sector = ntfs_bytes_to_bio_sector(disk_byte),
+		.folio_ofs = ni->folio_ofs,
+		.len = vol->mft_record_size,
+	};
+	if (nr_units == 1)
+		return 1;
+
+	units[0].len = vol->cluster_size;
+	disk_byte = NTFS_CLU_TO_B(vol, ni->mft_lcn[1]);
+	units[1] = (struct ntfs_mft_io_unit){
+		.sector = ntfs_bytes_to_bio_sector(disk_byte),
+		.folio_ofs = ni->folio_ofs + vol->cluster_size,
+		.len = vol->mft_record_size - vol->cluster_size,
+	};
+	return 2;
+}
+#endif
+
 /*
  * write_mft_record_nolock - write out a mapped (extent) mft record
  * @ni:		ntfs inode describing the mapped (extent) mft record
@@ -772,6 +913,137 @@ static int ntfs_sync_mft_mirror_record(struct ntfs_volume *vol,
  */
 int write_mft_record_nolock(struct ntfs_inode *ni, struct mft_record *m, int sync)
 {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
+	struct ntfs_volume *vol = ni->vol;
+	struct folio *folio = ni->folio;
+	DECLARE_COMPLETION_ONSTACK(done);
+	struct ntfs_mft_io_unit units[2];
+	struct ntfs_mft_write_ctx *ctx;
+	struct bio *parent, *child = NULL;
+	unsigned int nr_units;
+	int err = 0;
+	u8 *kaddr;
+	struct mft_record *fixup_m;
+
+	ntfs_debug("Entering for inode 0x%llx.", ni->mft_no);
+
+	WARN_ON(NInoAttr(ni));
+	WARN_ON(!folio_test_locked(folio));
+
+	if (folio_test_writeback(folio))
+		folio_wait_writeback(folio);
+
+	/*
+	 * If the struct ntfs_inode is clean no need to do anything.  If it is dirty,
+	 * mark it as clean now so that it can be redirtied later on if needed.
+	 * There is no danger of races since the caller is holding the locks
+	 * for the mft record @m and the page it is in.
+	 */
+	if (!NInoTestClearDirty(ni))
+		goto done;
+
+	err = ntfs_prepare_mft_record_io_units(ni, units);
+	if (err < 0)
+		goto err_out;
+	nr_units = err;
+
+	kaddr = kmap_local_folio(folio, 0);
+	fixup_m = (struct mft_record *)(kaddr + ni->folio_ofs);
+	memcpy(fixup_m, m, vol->mft_record_size);
+
+	/* Apply the mst protection fixups. */
+	err = pre_write_mst_fixup((struct ntfs_record *)fixup_m, vol->mft_record_size);
+	if (err) {
+		ntfs_error(vol->sb, "Failed to apply mst fixups!");
+		goto unmap_err_out;
+	}
+
+	parent = ntfs_alloc_mft_parent_bio(vol, folio, sync ? &done : NULL);
+	if (!parent) {
+		err = -ENOMEM;
+		goto unmap_err_out;
+	}
+	ctx = container_of(parent, struct ntfs_mft_write_ctx, bio);
+
+	parent->bi_iter.bi_sector = units[0].sector;
+	if (!bio_add_folio(parent, folio, units[0].len, units[0].folio_ofs)) {
+		err = -EIO;
+		goto put_bios_out;
+	}
+
+	if (nr_units == 2) {
+		if (bio_end_sector(parent) != units[1].sector ||
+		    !bio_add_folio(parent, folio, units[1].len,
+				   units[1].folio_ofs)) {
+			child = bio_alloc(vol->sb->s_bdev, 1, REQ_OP_WRITE,
+					  GFP_NOIO);
+			if (!child) {
+				err = -ENOMEM;
+				goto put_bios_out;
+			}
+			child->bi_iter.bi_sector = units[1].sector;
+			if (!bio_add_folio(child, folio, units[1].len,
+					   units[1].folio_ofs)) {
+				err = -EIO;
+				goto put_bios_out;
+			}
+		}
+	}
+
+	if (ni->mft_no < vol->mftmirr_size) {
+		err = ntfs_sync_mft_mirror_record(vol, folio, ni->mft_no);
+		if (err)
+			ctx->error = err;
+	}
+
+	kunmap_local(kaddr);
+
+	ntfs_start_mft_writeback(ctx);
+	if (child) {
+		bio_chain(child, parent);
+		submit_bio(child);
+	}
+	submit_bio(parent);
+
+	if (sync) {
+		wait_for_completion(&done);
+		if (!err && parent->bi_status)
+			err = blk_status_to_errno(parent->bi_status);
+		bio_put(parent);
+	}
+
+	if (unlikely(err)) {
+		/* I/O error during writing.  This is really bad! */
+		ntfs_error(vol->sb,
+			"I/O error while writing mft record 0x%llx!  Marking base inode as bad.  You should unmount the volume and run chkdsk.",
+			ni->mft_no);
+		return err;
+	}
+done:
+	ntfs_debug("Done.");
+	return 0;
+put_bios_out:
+	if (child)
+		bio_put(child);
+	bio_put(parent);
+unmap_err_out:
+	kunmap_local(kaddr);
+err_out:
+	/*
+	 * The caller should mark the base inode as bad so no more I/O
+	 * happens. ->drop_inode() will still be invoked so all extent inodes
+	 * and other allocated memory will be freed. ENOMEM is retried by
+	 * redirtying the mft record below.
+	 */
+	if (err == -ENOMEM) {
+		ntfs_error(vol->sb,
+			"Not enough memory to write mft record. Redirtying so the write is retried later.");
+		mark_mft_record_dirty(ni);
+		err = 0;
+	} else
+		NVolSetErrors(vol);
+	return err;
+#else
 	struct ntfs_volume *vol = ni->vol;
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
 	struct folio *folio = ni->folio;
@@ -933,6 +1205,7 @@ err_out:
 	} else
 		NVolSetErrors(vol);
 	return err;
+#endif
 }
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 1, 0)
