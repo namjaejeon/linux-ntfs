@@ -4068,12 +4068,14 @@ static int ntfs_write_mft_block(struct page *page, struct writeback_control *wbc
 	BUG_ON(!PageUptodate(page));
 	ClearPageUptodate(page);
 
-	for (mft_ofs = 0; mft_ofs < PAGE_SIZE && vcn < end_vcn;
+	for (mft_ofs = 0; mft_ofs < PAGE_SIZE;
 	     mft_ofs += vol->mft_record_size) {
 		/* Get the mft record number. */
 		mft_no = (((s64)page->index << PAGE_SHIFT) + mft_ofs) >>
 			vol->mft_record_size_bits;
 		vcn = mft_no << vol->mft_record_size_bits >> vol->cluster_size_bits;
+		if (vcn >= end_vcn)
+			break;
 		/* Check whether to write this mft record. */
 		tni = NULL;
 		if (ntfs_may_write_mft_record(vol, mft_no,
