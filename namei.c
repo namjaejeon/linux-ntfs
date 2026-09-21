@@ -510,7 +510,7 @@ static struct ntfs_inode *__ntfs_create(struct user_namespace *mnt_userns, struc
 	mark_inode_dirty(dir);
 
 	err = ntfs_mft_record_alloc(dir_ni->vol, mode, &ni, NULL,
-				    &ni_mrec);
+			&ni_mrec, -1);
 	if (err) {
 		iput(vi);
 		return ERR_PTR(err);

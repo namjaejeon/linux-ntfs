@@ -13,6 +13,7 @@ ntfs-$(CONFIG_NTFS_FS_WOF_COMPRESSION) += wof.o \
 
 ccflags-$(CONFIG_NTFS_DEBUG) += -DDEBUG
 ccflags-$(CONFIG_FS_POSIX_ACL) += -DCONFIG_NTFS_FS_POSIX_ACL=1
+ccflags-$(CONFIG_NTFS_FS_WOF_COMPRESSION) += -DCONFIG_NTFS_FS_WOF_COMPRESSION
 else
 # Called from external kernel module build
 
