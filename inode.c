@@ -1602,6 +1602,10 @@ static int ntfs_read_locked_attr_inode(struct inode *base_vi, struct inode *vi)
 		vi->i_blocks = ni->itype.compressed.size >> 9;
 	else
 		vi->i_blocks = ni->allocated_size >> 9;
+	if (ni->type == AT_DATA && ni->name_len) {
+		vi->i_op = &ntfs_stream_inode_ops;
+		vi->i_fop = &ntfs_stream_file_ops;
+	}
 	/*
 	 * Make sure the base inode does not go away and attach it to the
 	 * attribute inode.
@@ -2619,6 +2623,10 @@ int ntfs_show_options(struct seq_file *sf, struct dentry *root)
 		seq_puts(sf, ",symlink=native");
 	else
 		seq_puts(sf, ",symlink=wsl");
+	if (NVolStreamsWindows(vol))
+		seq_puts(sf, ",streams_interface=windows");
+	else
+		seq_puts(sf, ",streams_interface=none");
 	if (vol->sb->s_flags & SB_POSIXACL)
 		seq_puts(sf, ",acl");
 	return 0;
@@ -2691,13 +2699,19 @@ out:
 int ntfs_truncate_vfs(struct inode *vi, loff_t new_size, loff_t i_size)
 {
 	struct ntfs_inode *ni = NTFS_I(vi);
+	struct ntfs_inode *mrec_ni = ntfs_base_inode(ni);
 	int err;
 
-	mutex_lock(&ni->mrec_lock);
+	mutex_lock(&mrec_ni->mrec_lock);
 	err = __ntfs_attr_truncate_vfs(ni, new_size, i_size);
-	mutex_unlock(&ni->mrec_lock);
+	mutex_unlock(&mrec_ni->mrec_lock);
 	if (err < 0)
 		return err;
+
+	if (ntfs_inode_is_named_stream(ni)) {
+		ntfs_stream_update_base_time(mrec_ni);
+		return 0;
+	}
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 7, 0)
@@ -3970,7 +3984,8 @@ static inline int ntfs_enlarge_attribute(struct inode *vi, s64 pos, s64 count,
 
 static s64 __ntfs_inode_resident_attr_pwrite(struct inode *vi,
 					     s64 pos, s64 count, u8 *buf,
-					     struct ntfs_attr_search_ctx *ctx)
+					     struct ntfs_attr_search_ctx *ctx,
+					     bool *modified)
 {
 	struct ntfs_inode *ni = NTFS_I(vi);
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
@@ -3993,6 +4008,8 @@ static s64 __ntfs_inode_resident_attr_pwrite(struct inode *vi,
 	addr = (u8 *)ctx->attr + le16_to_cpu(ctx->attr->data.resident.value_offset);
 	memcpy(addr + pos, buf, count);
 	mark_mft_record_dirty(ctx->ntfs_ino);
+	if (count)
+		*modified = true;
 
 	/* Keep the first page clean and uptodate */
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
@@ -4055,8 +4072,7 @@ out:
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
 static s64 __ntfs_inode_non_resident_attr_pwrite(struct inode *vi,
 						 s64 pos, s64 count, u8 *buf,
-						 struct ntfs_attr_search_ctx *ctx,
-						 bool sync)
+						 bool sync, bool *modified)
 {
 	struct ntfs_inode *ni = NTFS_I(vi);
 	struct address_space *mapping = vi->i_mapping;

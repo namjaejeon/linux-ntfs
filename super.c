@@ -27,6 +27,7 @@
 #include "bitmap.h"
 #include "volume.h"
 #include "uapi_ntfs.h"
+#include "stream.h"
 
 /* A global default upcase table and a corresponding reference count. */
 static __le16 *default_upcase;
@@ -72,6 +73,17 @@ static const struct constant_table ntfs_symlink_enums[] = {
 };
 
 enum {
+	STREAMS_INTERFACE_NONE,
+	STREAMS_INTERFACE_WINDOWS,
+};
+
+static const struct constant_table ntfs_streams_interface_enums[] = {
+	{ "none",	STREAMS_INTERFACE_NONE },
+	{ "windows",	STREAMS_INTERFACE_WINDOWS },
+	{}
+};
+
+enum {
 	Opt_uid,
 	Opt_gid,
 	Opt_umask,
@@ -96,6 +108,7 @@ enum {
 	Opt_nocase,
 	Opt_native_symlink,
 	Opt_symlink,
+	Opt_streams_interface,
 };
 
 static const struct fs_parameter_spec ntfs_parameters[] = {
@@ -123,6 +136,8 @@ static const struct fs_parameter_spec ntfs_parameters[] = {
 	fsparam_flag("nocase",			Opt_nocase),
 	fsparam_enum("native_symlink",		Opt_native_symlink, ntfs_native_symlink_enums),
 	fsparam_enum("symlink",			Opt_symlink, ntfs_symlink_enums),
+	fsparam_enum("streams_interface",	Opt_streams_interface,
+		     ntfs_streams_interface_enums),
 	{}
 };
 
@@ -259,6 +274,22 @@ static int ntfs_parse_param(struct fs_context *fc, struct fs_parameter *param)
 		else
 			NVolClearSymlinkNative(vol);
 		break;
+	case Opt_streams_interface: {
+		bool streams_windows =
+			result.uint_32 == STREAMS_INTERFACE_WINDOWS;
+
+		if (fc->purpose == FS_CONTEXT_FOR_RECONFIGURE &&
+		    NVolStreamsWindows(vol) != streams_windows) {
+			ntfs_error(vol->sb,
+				   "Cannot change streams_interface on remount.");
+			return -EINVAL;
+		}
+		if (streams_windows)
+			NVolSetStreamsWindows(vol);
+		else
+			NVolClearStreamsWindows(vol);
+		break;
+	}
 	case Opt_sparse:
 		break;
 	default:
@@ -2943,6 +2974,8 @@ static int ntfs_fill_super(struct super_block *sb, struct fs_context *fc)
 	 * operations and associated address space operations to function.
 	 */
 	sb->s_op = &ntfs_sops;
+	if (NVolStreamsWindows(vol))
+		ntfs_set_default_dentry_ops(sb);
 	tmp_ino = new_inode(sb);
 	if (!tmp_ino) {
 		if (!silent)
