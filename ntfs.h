@@ -203,6 +203,8 @@ extern const struct inode_operations ntfs_empty_inode_ops;
 #endif
 
 int ntfs_fileattr_get(struct dentry *dentry, NTFS_FILEATTR_TYPE *fa);
+int ntfs_fileattr_set(NTFS_IDMAP_TYPE *idmap, struct dentry *dentry,
+		      NTFS_FILEATTR_TYPE *fa);
 
 extern const struct export_operations ntfs_export_ops;
 

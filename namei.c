@@ -1872,7 +1872,6 @@ out:
  * Inode operations for directories.
  */
 const struct inode_operations ntfs_dir_inode_ops = {
-	.fileattr_get	= ntfs_fileattr_get,
 	.lookup		= ntfs_lookup,	/* VFS: Lookup directory. */
 	.create		= ntfs_create,
 	.unlink		= ntfs_unlink,
@@ -1884,6 +1883,8 @@ const struct inode_operations ntfs_dir_inode_ops = {
 	.listxattr	= ntfs_listxattr,
 	.setattr	= ntfs_setattr,
 	.getattr	= ntfs_getattr,
+	.fileattr_get	= ntfs_fileattr_get,
+	.fileattr_set	= ntfs_fileattr_set,
 	.symlink	= ntfs_symlink,
 	.mknod		= ntfs_mknod,
 	.link		= ntfs_link,
