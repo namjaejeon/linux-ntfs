@@ -15,6 +15,7 @@
 #include <linux/posix_acl_xattr.h>
 #include <linux/compat.h>
 #include <linux/falloc.h>
+#include <linux/fileattr.h>
 #include <linux/file.h>
 #include <linux/list.h>
 #include <linux/overflow.h>
@@ -148,6 +149,35 @@ int ntfs_file_release(struct inode *vi, struct file *filp)
 	    !NInoWofCompressed(NTFS_I(vi)))
 		return ntfs_trim_prealloc(vi);
 
+	return 0;
+}
+
+/*
+ * ntfs_fileattr_get - inode_operations::fileattr_get
+ * @dentry: dentry to report the flags of
+ * @fa: filled in with the flags of @dentry
+ */
+int ntfs_fileattr_get(struct dentry *dentry, NTFS_FILEATTR_TYPE *fa)
+{
+	struct inode *vi = d_inode(dentry);
+	struct ntfs_inode *ni = NTFS_I(vi);
+	u32 flags = 0;
+
+	if (NVolShutdown(ni->vol))
+		return -EIO;
+
+	if (NInoCompressed(ni) || NInoWofCompressed(ni))
+		flags |= FS_COMPR_FL;
+	if (NInoEncrypted(ni))
+		flags |= FS_ENCRYPT_FL;
+	if (vi->i_flags & S_IMMUTABLE)
+		flags |= FS_IMMUTABLE_FL;
+	if (vi->i_flags & S_APPEND)
+		flags |= FS_APPEND_FL;
+	if (!NVolCaseSensitive(ni->vol))
+		flags |= FS_CASEFOLD_FL;
+
+	fileattr_fill_flags(fa, flags);
 	return 0;
 }
 
@@ -1618,6 +1648,7 @@ const struct file_operations ntfs_file_ops = {
 };
 
 const struct inode_operations ntfs_file_inode_ops = {
+	.fileattr_get	= ntfs_fileattr_get,
 	.setattr	= ntfs_setattr,
 	.getattr	= ntfs_getattr,
 	.listxattr	= ntfs_listxattr,
@@ -1627,12 +1658,14 @@ const struct inode_operations ntfs_file_inode_ops = {
 };
 
 const struct inode_operations ntfs_symlink_inode_operations = {
+	.fileattr_get	= ntfs_fileattr_get,
 	.get_link	= ntfs_get_link,
 	.setattr	= ntfs_setattr,
 	.listxattr	= ntfs_listxattr,
 };
 
 const struct inode_operations ntfs_special_inode_operations = {
+	.fileattr_get	= ntfs_fileattr_get,
 	.setattr	= ntfs_setattr,
 	.getattr	= ntfs_getattr,
 	.listxattr	= ntfs_listxattr,

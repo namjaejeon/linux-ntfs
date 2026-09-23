@@ -190,6 +190,20 @@ extern const struct inode_operations ntfs_dir_inode_ops;
 extern const struct  file_operations ntfs_empty_file_ops;
 extern const struct inode_operations ntfs_empty_inode_ops;
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
+#define NTFS_FILEATTR_TYPE	struct file_kattr
+#else
+#define NTFS_FILEATTR_TYPE	struct fileattr
+#endif
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0)
+#define NTFS_IDMAP_TYPE		struct mnt_idmap
+#else
+#define NTFS_IDMAP_TYPE		struct user_namespace
+#endif
+
+int ntfs_fileattr_get(struct dentry *dentry, NTFS_FILEATTR_TYPE *fa);
+
 extern const struct export_operations ntfs_export_ops;
 
 /*
