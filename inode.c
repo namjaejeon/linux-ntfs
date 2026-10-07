@@ -8,6 +8,7 @@
 
 #include <linux/writeback.h>
 #include <linux/seq_file.h>
+#include <linux/mm.h>
 
 #include "lcnalloc.h"
 #include "time.h"
@@ -2566,50 +2567,62 @@ int ntfs_extend_initialized_size(struct inode *vi, const loff_t offset,
 				 const loff_t new_size)
 {
 	struct ntfs_inode *ni = NTFS_I(vi);
-	loff_t old_init_size;
+	loff_t old_init_size, clear_size;
 	unsigned long flags;
-	int err;
+	int err = 0;
 
+	if (!NInoNonResident(ni))
+		return -EINVAL;
+
+	filemap_invalidate_lock(vi->i_mapping);
 	read_lock_irqsave(&ni->size_lock, flags);
 	old_init_size = ni->initialized_size;
 	read_unlock_irqrestore(&ni->size_lock, flags);
 
-	if (!NInoNonResident(ni))
-		return -EINVAL;
 	if (old_init_size >= new_size)
-		return 0;
+		goto out;
 
 	err = ntfs_attr_map_whole_runlist(ni);
 	if (err)
-		return err;
+		goto out;
 
-	if (!NInoCompressed(ni) && old_init_size < offset) {
+	if (!NInoCompressed(ni)) {
+		/*
+		 * Zeroing skips holes, so discard cached uninitialized bytes
+		 * before making them visible to writes or shared mappings.
+		 */
+		clear_size = max_t(loff_t, i_size_read(vi), new_size);
+		truncate_pagecache_range(vi, old_init_size, clear_size - 1);
+
+		if (old_init_size < offset) {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
-		err = iomap_zero_range(vi, old_init_size,
-				       offset - old_init_size,
-				       NULL, &ntfs_seek_iomap_ops,
-				       &ntfs_iomap_folio_ops, NULL);
+			err = iomap_zero_range(vi, old_init_size,
+					       offset - old_init_size,
+					       NULL, &ntfs_seek_iomap_ops,
+					       &ntfs_iomap_folio_ops, NULL);
 #else
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 15, 0)
-                err = iomap_zero_range(vi, old_init_size,
-				       offset - old_init_size,
-				       NULL, &ntfs_seek_iomap_ops, NULL);
+			err = iomap_zero_range(vi, old_init_size,
+					       offset - old_init_size,
+					       NULL, &ntfs_seek_iomap_ops, NULL);
 #else
-		err = iomap_zero_range(vi, old_init_size,
-				       offset - old_init_size,
-				       NULL, &ntfs_seek_iomap_ops);
+			err = iomap_zero_range(vi, old_init_size,
+					       offset - old_init_size,
+					       NULL, &ntfs_seek_iomap_ops);
 #endif
 #endif
-		if (err)
-			return err;
+			if (err)
+				goto out;
+		}
 	}
-
 
 	mutex_lock(&ni->mrec_lock);
 	err = ntfs_attr_set_initialized_size(ni, new_size);
 	mutex_unlock(&ni->mrec_lock);
 	if (err)
 		truncate_setsize(vi, old_init_size);
+out:
+	filemap_invalidate_unlock(vi->i_mapping);
 	return err;
 }
 
