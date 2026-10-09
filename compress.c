@@ -182,8 +182,8 @@ static int ntfs_decompress(struct page *dest_pages[], int completed_pages[],
 	u8 *dp_addr;		/* Current pointer into dp. */
 	u8 *dp_sb_start;	/* Start of current sub-block in dp. */
 	u8 *dp_sb_end;		/* End of current sb in dp (dp_sb_start + NTFS_SB_SIZE). */
-	u16 do_sb_start;	/* @dest_ofs when starting this sub-block. */
-	u16 do_sb_end;		/* @dest_ofs of end of this sb (do_sb_start + NTFS_SB_SIZE). */
+	int do_sb_start;	/* @dest_ofs when starting this sub-block. */
+	int do_sb_end;		/* @dest_ofs of end of this sb (do_sb_start + NTFS_SB_SIZE). */
 
 	/* Variables for tag and token parsing. */
 	u8 tag;			/* Current tag. */
@@ -1343,7 +1343,8 @@ static void ntfs_copy_cb(struct page **pages, int pages_per_cb,
 
 	for (i = 0; i < pages_per_cb && copied < bytes; i++) {
 		unsigned int offset = i ? 0 : page_offset;
-		unsigned int len = min(bytes - copied, PAGE_SIZE - offset);
+		unsigned int len = min_t(unsigned int, bytes - copied,
+					 PAGE_SIZE - offset);
 		void *addr = kmap_local_page(pages[i]);
 
 		memcpy(ws->outbuf + copied, addr + offset, len);
