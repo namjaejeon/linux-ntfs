@@ -481,10 +481,11 @@ static void ntfs_readahead(struct readahead_control *rac)
 #endif
 
 	/*
-	 * Resident files are not cached in the page cache,
-	 * and readahead is not implemented for compressed files.
+	 * Resident files are not cached in the page cache, readahead is not
+	 * implemented for compressed files, and ntfs_read_folio() refuses
+	 * encrypted files because decryption is not implemented.
 	 */
-	if (!NInoNonResident(ni) || NInoCompressed(ni) ||
+	if (!NInoNonResident(ni) || NInoEncrypted(ni) || NInoCompressed(ni) ||
 	    NInoWofCompressed(ni))
 		return;
 
