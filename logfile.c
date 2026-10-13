@@ -481,6 +481,9 @@ bool ntfs_check_logfile(struct inode *log_vi, struct restart_page_header **rp)
 #else
 	struct page *page = NULL;
 #endif
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
+	u8 *kbase = NULL;
+#endif
 	u8 *kaddr = NULL;
 	struct restart_page_header *rstr1_ph = NULL;
 	struct restart_page_header *rstr2_ph = NULL;
@@ -536,7 +539,7 @@ bool ntfs_check_logfile(struct inode *log_vi, struct restart_page_header **rp)
 
 		if (!folio || folio->index != idx) {
 			if (folio) {
-				kunmap_local(kaddr);
+				kunmap_local(kbase);
 				folio_put(folio);
 			}
 			folio = read_mapping_folio(mapping, idx, NULL);
@@ -545,8 +548,9 @@ bool ntfs_check_logfile(struct inode *log_vi, struct restart_page_header **rp)
 						idx);
 				goto err_out;
 			}
+			kbase = kmap_local_folio(folio, 0);
 		}
-		kaddr = (u8 *)kmap_local_folio(folio, 0) + (pos & ~PAGE_MASK);
+		kaddr = kbase + (pos & ~PAGE_MASK);
 #else
 		pgoff_t idx = pos >> PAGE_SHIFT;
 
@@ -617,7 +621,7 @@ bool ntfs_check_logfile(struct inode *log_vi, struct restart_page_header **rp)
 		 */
 		if (err != -EINVAL) {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
-			kunmap_local(kaddr);
+			kunmap_local(kbase);
 			folio_put(folio);
 #else
 			kunmap(page);
@@ -631,7 +635,7 @@ bool ntfs_check_logfile(struct inode *log_vi, struct restart_page_header **rp)
 	}
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
 	if (folio) {
-		kunmap_local(kaddr);
+		kunmap_local(kbase);
 		folio_put(folio);
 	}
 #else
@@ -745,7 +749,11 @@ map_vcn:
 
 	memset(empty_buf, 0xff, vol->cluster_size);
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 0, 0)
+	ra = kzalloc_obj(*ra, GFP_NOFS);
+#else
 	ra = kzalloc(sizeof(*ra), GFP_NOFS);
+#endif
 	if (!ra)
 		goto err;
 

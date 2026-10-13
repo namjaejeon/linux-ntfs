@@ -527,8 +527,13 @@ int ntfs_read_compressed_block(struct page *page)
 		return -EIO;
 	}
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 0, 0)
+	pages = kmalloc_objs(struct page *, nr_pages, GFP_NOFS);
+	completed_pages = kmalloc_objs(int, nr_pages + 1, GFP_NOFS);
+#else
 	pages = kmalloc_array(nr_pages, sizeof(struct page *), GFP_NOFS);
 	completed_pages = kmalloc_array(nr_pages + 1, sizeof(int), GFP_NOFS);
+#endif
 
 	if (unlikely(!pages || !completed_pages)) {
 		kfree(pages);
@@ -1294,7 +1299,11 @@ static int ntfs_compress_workspace_init(struct ntfs_inode *ni,
 	size = ni->itype.compressed.block_size + 2 *
 		(ni->itype.compressed.block_size / NTFS_SB_SIZE) + 2;
 	ws->nr_pages = DIV_ROUND_UP(size, PAGE_SIZE);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 0, 0)
+	ws->pages = kzalloc_objs(*ws->pages, ws->nr_pages, GFP_NOFS);
+#else
 	ws->pages = kcalloc(ws->nr_pages, sizeof(*ws->pages), GFP_NOFS);
+#endif
 	if (!ws->pages)
 		return -ENOMEM;
 
@@ -1515,7 +1524,11 @@ int ntfs_compress_write(struct ntfs_inode *ni, loff_t pos, size_t count,
 	pages_per_cb = DIV_ROUND_UP(offset_in_page(pos & ~(cb_size - 1)) +
 			cb_size, PAGE_SIZE);
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 0, 0)
+	pages = kmalloc_objs(struct page *, pages_per_cb, GFP_NOFS);
+#else
 	pages = kmalloc_array(pages_per_cb, sizeof(struct page *), GFP_NOFS);
+#endif
 	if (!pages)
 		return -ENOMEM;
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 0, 0)

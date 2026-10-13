@@ -172,8 +172,13 @@ found_it:
 			 */
 			if (ie->key.file_name.file_name_type == FILE_NAME_DOS) {
 				if (!name) {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 0, 0)
+					name = kmalloc_obj(struct ntfs_name,
+							GFP_NOFS);
+#else
 					name = kmalloc(sizeof(struct ntfs_name),
 							GFP_NOFS);
+#endif
 					if (!name) {
 						err = -ENOMEM;
 						goto err_out;
@@ -244,7 +249,7 @@ found_it:
 		 */
 		rc = ntfs_collate_names(uname, uname_len,
 				(__le16 *)&ie->key.file_name.file_name,
-				ie->key.file_name.file_name_length, 1,
+				ie->key.file_name.file_name_length, false,
 				IGNORE_CASE, vol->upcase, vol->upcase_len);
 		/*
 		 * If uname collates before the name of the current entry, there
@@ -263,7 +268,7 @@ found_it:
 		 */
 		rc = ntfs_collate_names(uname, uname_len,
 				(__le16 *)&ie->key.file_name.file_name,
-				ie->key.file_name.file_name_length, 1,
+				ie->key.file_name.file_name_length, false,
 				CASE_SENSITIVE, vol->upcase, vol->upcase_len);
 		if (rc == -1)
 			break;
@@ -338,7 +343,6 @@ descend_into_child_node:
 	}
 
 	memcpy_from_folio(kaddr, folio, 0, PAGE_SIZE);
-	post_read_mst_fixup((struct ntfs_record *)kaddr, PAGE_SIZE);
 	folio_unlock(folio);
 	folio_put(folio);
 #else
@@ -357,7 +361,6 @@ descend_into_child_node:
 		goto unm_err_out;
 	}
 	memcpy(kaddr, (u8 *)page_address(page), PAGE_SIZE);
-	post_read_mst_fixup((struct ntfs_record *)kaddr, PAGE_SIZE);
 	unlock_page(page);
 	kunmap(page);
 	put_page(page);
@@ -377,6 +380,14 @@ fast_descend_into_child_node:
 	if (index_end > kaddr + PAGE_SIZE) {
 		ntfs_error(sb,
 			   "Index buffer (VCN 0x%llx) of directory inode 0x%llx crosses page boundary. Impossible! Cannot access! This is probably a bug in the driver.",
+			   vcn, dir_ni->mft_no);
+		goto unm_err_out;
+	}
+	err = post_read_mst_fixup((struct ntfs_record *)ia,
+				  dir_ni->itype.index.block_size);
+	if (err) {
+		ntfs_error(sb,
+			   "MST fixup failed for index block vcn %lld in directory inode 0x%llx.",
 			   vcn, dir_ni->mft_no);
 		goto unm_err_out;
 	}
@@ -429,8 +440,13 @@ found_it2:
 			 */
 			if (ie->key.file_name.file_name_type == FILE_NAME_DOS) {
 				if (!name) {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 0, 0)
+					name = kmalloc_obj(struct ntfs_name,
+							GFP_NOFS);
+#else
 					name = kmalloc(sizeof(struct ntfs_name),
 							GFP_NOFS);
+#endif
 					if (!name) {
 						err = -ENOMEM;
 						goto unm_err_out;
@@ -502,7 +518,7 @@ found_it2:
 		 */
 		rc = ntfs_collate_names(uname, uname_len,
 				(__le16 *)&ie->key.file_name.file_name,
-				ie->key.file_name.file_name_length, 1,
+				ie->key.file_name.file_name_length, false,
 				IGNORE_CASE, vol->upcase, vol->upcase_len);
 		/*
 		 * If uname collates before the name of the current entry, there
@@ -521,7 +537,7 @@ found_it2:
 		 */
 		rc = ntfs_collate_names(uname, uname_len,
 				(__le16 *)&ie->key.file_name.file_name,
-				ie->key.file_name.file_name_length, 1,
+				ie->key.file_name.file_name_length, false,
 				CASE_SENSITIVE, vol->upcase, vol->upcase_len);
 		if (rc == -1)
 			break;
@@ -656,11 +672,11 @@ static inline int ntfs_filldir(struct ntfs_volume *vol,
 	}
 
 	mref = MREF_LE(ie->data.dir.indexed_file);
-	if (ie->key.file_name.file_attributes &
+	if (ie->key.file_name.file_attributes & FILE_ATTR_REPARSE_POINT)
+		dt_type = ntfs_reparse_tag_dt_types(vol, mref);
+	else if (ie->key.file_name.file_attributes &
 			FILE_ATTR_DUP_FILE_NAME_INDEX_PRESENT)
 		dt_type = DT_DIR;
-	else if (ie->key.file_name.file_attributes & FILE_ATTR_REPARSE_POINT)
-		dt_type = ntfs_reparse_tag_dt_types(vol, mref);
 	else
 		dt_type = DT_REG;
 
@@ -728,7 +744,11 @@ static int ntfs_ia_blocks_readahead(struct ntfs_inode *ia_ni, loff_t pos)
 	if (dir_start_index >= dir_end_index)
 		return 0;
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 0, 0)
+	dir_ra = kzalloc_obj(*dir_ra, GFP_NOFS);
+#else
 	dir_ra = kzalloc(sizeof(*dir_ra), GFP_NOFS);
+#endif
 	if (!dir_ra)
 		return -ENOMEM;
 
@@ -805,7 +825,11 @@ static int ntfs_readdir(struct file *file, struct dir_context *actor)
 		return -ENOMEM;
 	}
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 0, 0)
+	ra = kzalloc_obj(struct file_ra_state, GFP_NOFS);
+#else
 	ra = kzalloc(sizeof(struct file_ra_state), GFP_NOFS);
+#endif
 	if (!ra) {
 		kfree(name);
 		ntfs_index_ctx_put(ictx);
@@ -841,7 +865,11 @@ static int ntfs_readdir(struct file *file, struct dir_context *actor)
 			goto out;
 		}
 	} else if (!private) {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 0, 0)
+		private = kzalloc_obj(struct ntfs_file_private, GFP_KERNEL);
+#else
 		private = kzalloc(sizeof(struct ntfs_file_private), GFP_KERNEL);
+#endif
 		if (!private) {
 			err = -ENOMEM;
 			goto out;
@@ -977,7 +1005,11 @@ nextdir:
 		}
 
 		if (!nir) {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 0, 0)
+			nir = kzalloc_obj(struct ntfs_index_ra, GFP_KERNEL);
+#else
 			nir = kzalloc(sizeof(struct ntfs_index_ra), GFP_KERNEL);
+#endif
 			if (nir) {
 				nir->start_index = index;
 				nir->count = 1;

@@ -235,7 +235,11 @@ static int ntfs_set_ea(struct inode *inode, const char *name, size_t name_len,
 		ea_info_qsize = le32_to_cpu(p_ea_info->ea_query_length);
 	} else {
 create_ea_info:
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 0, 0)
+		p_ea_info = kzalloc_obj(struct ea_information, GFP_NOFS);
+#else
 		p_ea_info = kzalloc(sizeof(struct ea_information), GFP_NOFS);
+#endif
 		if (!p_ea_info)
 			return -ENOMEM;
 
