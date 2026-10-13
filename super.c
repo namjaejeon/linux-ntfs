@@ -1005,6 +1005,14 @@ static bool parse_ntfs_boot_sector(struct ntfs_volume *vol,
 				vol->mft_record_size_bits;
 	ntfs_debug("vol->mftmirr_size = %i", vol->mftmirr_size);
 	vol->serial_no = le64_to_cpu(b->volume_serial_number);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 0, 0)
+	super_set_uuid(vol->sb, (const u8 *)&b->volume_serial_number,
+		       sizeof(b->volume_serial_number));
+#else
+				memcpy(&vol->sb->s_uuid, &b->volume_serial_number,
+				       min_t(size_t, sizeof(vol->sb->s_uuid),
+					     sizeof(b->volume_serial_number)));
+#endif
 	ntfs_debug("vol->serial_no = 0x%llx", vol->serial_no);
 
 	vol->sparse_compression_unit = 4;
