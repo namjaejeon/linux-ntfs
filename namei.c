@@ -485,8 +485,10 @@ static struct ntfs_inode *__ntfs_create(struct user_namespace *mnt_userns, struc
 #else
 		err = ntfs_init_acl(mnt_userns, vi, dir);
 #endif
-		if (err)
-			goto err_out;
+		if (err) {
+			iput(vi);
+			return ERR_PTR(err);
+		}
 	} else
 #endif
 	{
