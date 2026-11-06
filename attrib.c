@@ -5126,6 +5126,12 @@ attr_resize_again:
 			continue;
 		if (a->type == AT_DATA && !value_len)
 			continue;
+		/*
+		 * Named streams have inodes of their own and are not converted
+		 * from here.
+		 */
+		if (a->type == AT_DATA && a->name_length)
+			continue;
 
 		if (a->type == AT_DATA)
 			tvi = ntfs_iget(sb, base_ni->mft_no);
