@@ -8,6 +8,7 @@
  */
 
 #include <linux/blkdev.h>
+#include <linux/string.h>
 
 #include "dir.h"
 #include "mft.h"
@@ -318,6 +319,20 @@ found_it:
 
 	ia_mapping = ia_vi->i_mapping;
 descend_into_child_node:
+	/*
+	 * The child node has to be inside $INDEX_ALLOCATION. A directory that
+	 * lacks the attribute gets an empty index inode that is not
+	 * non-resident, and reading a folio from it locks the mft record that
+	 * is already locked here.
+	 */
+	if (!NInoNonResident(NTFS_I(ia_vi)) || vcn < 0 ||
+	    (u64)vcn >= (u64)i_size_read(ia_vi) >> dir_ni->itype.index.vcn_size_bits) {
+		ntfs_error(sb,
+			"Child node vcn %lld is outside $INDEX_ALLOCATION in directory inode 0x%llx.",
+			vcn, dir_ni->mft_no);
+		err = -EIO;
+		goto err_out;
+	}
 	/*
 	 * Convert vcn to index into the index allocation attribute in units
 	 * of PAGE_SIZE and map the page cache page, reading it from
@@ -661,7 +676,6 @@ static inline int ntfs_filldir(struct ntfs_volume *vol,
 		ntfs_debug("Skipping hidden file.");
 		return 0;
 	}
-
 	name_len = ntfs_ucstonls(vol, (__le16 *)&ie->key.file_name.file_name,
 			ie->key.file_name.file_name_length, &name,
 			NTFS_MAX_NAME_LEN * NLS_MAX_CHARSET_SIZE + 1);
@@ -670,7 +684,10 @@ static inline int ntfs_filldir(struct ntfs_volume *vol,
 				(long long)MREF_LE(ie->data.dir.indexed_file));
 		return 0;
 	}
-
+	if (NVolStreamsWindows(vol) && strchr((char *)name, ':')) {
+		ntfs_debug("Skipping file name containing a stream separator.");
+		return 0;
+	}
 	mref = MREF_LE(ie->data.dir.indexed_file);
 	if (ie->key.file_name.file_attributes & FILE_ATTR_REPARSE_POINT)
 		dt_type = ntfs_reparse_tag_dt_types(vol, mref);
@@ -1242,6 +1259,8 @@ static int ntfs_dir_fsync(struct file *filp, loff_t start, loff_t end,
 	err = sync_blockdev(vi->i_sb->s_bdev);
 	if (unlikely(err && !ret))
 		ret = err;
+	if (!ret)
+		ret = blkdev_issue_flush(vi->i_sb->s_bdev);
 	if (likely(!ret))
 		ntfs_debug("Done.");
 	else

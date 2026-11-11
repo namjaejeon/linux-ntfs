@@ -23,6 +23,13 @@
 #include <asm/unaligned.h>
 #endif
 
+#ifndef kmalloc_obj
+#define kmalloc_obj(VAR_OR_TYPE, ...)					\
+	kmalloc(sizeof(VAR_OR_TYPE), __VA_ARGS__)
+#define kmalloc_objs(VAR_OR_TYPE, COUNT, ...)				\
+	kmalloc_array((COUNT), sizeof(VAR_OR_TYPE), __VA_ARGS__)
+#endif
+
 /* "Force inline" macro (not required, but helpful for performance). */
 #define forceinline __always_inline
 

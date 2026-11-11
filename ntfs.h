@@ -19,10 +19,12 @@
 #include <linux/module.h>
 #include <linux/compiler.h>
 #include <linux/fs.h>
+#include <linux/fileattr.h>
 #include <linux/nls.h>
 #include <linux/smp.h>
 #include <linux/pagemap.h>
 #include <linux/blk_types.h>
+#include <linux/slab.h>
 #include <linux/uidgid.h>
 
 #include "volume.h"
@@ -188,6 +190,22 @@ extern const struct inode_operations ntfs_dir_inode_ops;
 extern const struct  file_operations ntfs_empty_file_ops;
 extern const struct inode_operations ntfs_empty_inode_ops;
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
+#define NTFS_FILEATTR_TYPE	struct file_kattr
+#else
+#define NTFS_FILEATTR_TYPE	struct fileattr
+#endif
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0)
+#define NTFS_IDMAP_TYPE		struct mnt_idmap
+#else
+#define NTFS_IDMAP_TYPE		struct user_namespace
+#endif
+
+int ntfs_fileattr_get(struct dentry *dentry, NTFS_FILEATTR_TYPE *fa);
+int ntfs_fileattr_set(NTFS_IDMAP_TYPE *idmap, struct dentry *dentry,
+		      NTFS_FILEATTR_TYPE *fa);
+
 extern const struct export_operations ntfs_export_ops;
 
 /*
@@ -200,6 +218,41 @@ static inline struct ntfs_volume *NTFS_SB(struct super_block *sb)
 {
 	return sb->s_fs_info;
 }
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(7, 0, 0)
+#define inode_state_read_once(inode)	READ_ONCE((inode)->i_state)
+#endif
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 6, 0)
+#define inode_get_ctime(inode)		((inode)->i_ctime)
+#define inode_set_ctime_to_ts(inode, ts)	((inode)->i_ctime = (ts))
+#define inode_set_ctime_current(inode)					\
+	({								\
+		struct timespec64 __now = current_time(inode);		\
+		(inode)->i_ctime = __now;				\
+		__now;							\
+	})
+#endif
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 7, 0)
+#define inode_get_atime(inode)		((inode)->i_atime)
+#define inode_set_atime_to_ts(inode, ts)	((inode)->i_atime = (ts))
+#define inode_get_mtime(inode)		((inode)->i_mtime)
+#define inode_set_mtime_to_ts(inode, ts)	((inode)->i_mtime = (ts))
+#endif
+
+#ifndef kmalloc_obj
+#define kmalloc_obj(VAR_OR_TYPE, ...)					\
+	kmalloc(sizeof(VAR_OR_TYPE), __VA_ARGS__)
+#define kmalloc_objs(VAR_OR_TYPE, COUNT, ...)				\
+	kmalloc_array((COUNT), sizeof(VAR_OR_TYPE), __VA_ARGS__)
+#endif
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0)
+#define ntfs_file_mnt_idmap(file)	file_mnt_idmap(file)
+#else
+#define ntfs_file_mnt_idmap(file)	file_mnt_user_ns(file)
+#endif
 
 /* Declarations of functions and global variables. */
 

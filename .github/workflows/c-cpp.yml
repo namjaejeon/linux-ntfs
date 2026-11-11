@@ -14,7 +14,7 @@ on:
 jobs:
   build:
 
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
     - uses: actions/checkout@v4
@@ -155,6 +155,10 @@ jobs:
         echo "" >> local.config
         echo 'MOUNT_OPTIONS="-osymlink=native,native_symlink=rel"' >> local.config
         make -j$((`nproc`+1)) > /dev/null
+        # Ubuntu 24.04 LVM supports -y; avoid the legacy yes pipe EPIPE.
+        sed -i \
+          's/^yes | \$LVM_PROG lvcreate /$LVM_PROG lvcreate -y /' \
+          tests/generic/108
         echo 'FSTYP=ntfs' >> local.config
         sudo ./check generic/001
         sudo ./check generic/002

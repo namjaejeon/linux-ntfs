@@ -86,6 +86,7 @@
  * @nls_utf8: NLS table for UTF-8.
  * @free_waitq: Wait queue for threads waiting for free clusters or MFT records.
  * @free_clusters: Track the number of free clusters.
+ * @bad_clusters: Number of clusters recorded in $BadClus:$Bad.
  * @free_mft_records: Track the free mft records.
  * @dirty_clusters: Number of clusters that are dirty.
  * @sparse_compression_unit: Size of compression/sparse unit in clusters.
@@ -123,6 +124,7 @@ struct ntfs_volume {
 	u32 index_record_size_mask;
 	u8 index_record_size_bits;
 	s64 nr_clusters;
+	s64 bad_clusters;
 	s64 mft_lcn;
 	s64 mftmirr_lcn;
 	u64 serial_no;
@@ -195,6 +197,7 @@ struct ntfs_volume {
  * NV_DisableSparse		Disable creation of sparse regions.
  * NV_NativeSymlinkRel		Translate absolute Windows reparse targets (native_symlink=rel).
  * NV_MftBootstrap		Mount is still assembling $MFT's own runlist.
+ * NV_StreamsWindows		Interpret the final path component as file:stream.
  */
 enum {
 	NV_Errors,
@@ -216,6 +219,7 @@ enum {
 	NV_NativeSymlinkRel,
 	NV_SymlinkNative,
 	NV_MftBootstrap,
+	NV_StreamsWindows,
 };
 
 /*
@@ -256,6 +260,7 @@ DEFINE_NVOL_BIT_OPS(DisableSparse)
 DEFINE_NVOL_BIT_OPS(NativeSymlinkRel)
 DEFINE_NVOL_BIT_OPS(SymlinkNative)
 DEFINE_NVOL_BIT_OPS(MftBootstrap)
+DEFINE_NVOL_BIT_OPS(StreamsWindows)
 
 static inline void ntfs_inc_free_clusters(struct ntfs_volume *vol, s64 nr)
 {
